@@ -125,7 +125,7 @@ pub trait ConnectionMut<'c> {
 
 /// contains all the operations that can be made with a reference to connection state with a lifetime of `'c`
 pub trait ConnectionRef<'c> {
-    type ConnectionStats: std::fmt::Debug;
+    type ConnectionStats: std::fmt::Debug + 'static;
 
     fn get_stats(&self) -> Self::ConnectionStats;
 }

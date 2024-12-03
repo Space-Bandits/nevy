@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use transport_interface::*;
 
 mod stream_access;
@@ -24,6 +26,8 @@ trait BevyConnectionInner<'c> {
     ) -> Result<Option<BevyRecvStream>, MismatchedType>;
 
     fn poll_stream_events(&mut self) -> Option<BevyStreamEvent>;
+
+    fn get_stats(&self) -> Box<dyn Any>;
 }
 
 /// type erased mutable access to a connection
@@ -77,6 +81,10 @@ where
     fn poll_stream_events(&mut self) -> Option<BevyStreamEvent> {
         self.poll_stream_events().map(Into::into)
     }
+
+    fn get_stats(&self) -> Box<dyn Any> {
+        Box::new(self.get_stats())
+    }
 }
 
 impl<'c> BevyConnectionMut<'c> {
@@ -112,6 +120,10 @@ impl<'c> BevyConnectionMut<'c> {
 
     pub fn poll_stream_events(&mut self) -> Option<BevyStreamEvent> {
         self.inner.poll_stream_events()
+    }
+
+    pub fn get_stats(&self) -> Box<dyn Any> {
+        Box::new(self.inner.get_stats())
     }
 }
 
