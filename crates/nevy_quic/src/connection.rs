@@ -1,5 +1,9 @@
-use std::collections::{HashSet, VecDeque};
+use std::{
+    collections::{HashSet, VecDeque},
+    time::Duration,
+};
 
+use quinn_proto::ConnectionStats;
 use transport_interface::*;
 
 use crate::{endpoint::QuinnEndpoint, quinn_stream::QuinnStreamId};
@@ -97,7 +101,10 @@ impl QuinnConnection {
 }
 
 impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
-    type NonMut<'b> = &'b QuinnConnection where Self: 'b;
+    type NonMut<'b>
+        = &'b QuinnConnection
+    where
+        Self: 'b;
 
     type StreamType = QuinnStreamId;
 
@@ -115,9 +122,9 @@ impl<'c> ConnectionMut<'c> for &'c mut QuinnConnection {
 }
 
 impl<'c> ConnectionRef<'c> for &'c QuinnConnection {
-    type ConnectionStats = std::net::SocketAddr;
+    type ConnectionStats = (std::net::SocketAddr, ConnectionStats);
 
-    fn get_stats(&self) -> std::net::SocketAddr {
-        self.connection.remote_address()
+    fn get_stats(&self) -> (std::net::SocketAddr, ConnectionStats) {
+        (self.connection.remote_address(), self.connection.stats())
     }
 }

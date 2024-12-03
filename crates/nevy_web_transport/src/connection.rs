@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use log::{debug, error, trace, warn};
 use nevy_quic::prelude::*;
-use quinn_proto::Dir;
+use quinn_proto::{ConnectionStats, Dir};
 use transport_interface::*;
 use web_transport_proto::{ConnectRequest, ConnectResponse, Settings};
 
@@ -94,14 +94,14 @@ impl<'c> WebTransportConnectionMut<'c> {
 
     /// transitions to the failed state and disconnects the quic connection
     fn fail(&mut self) {
-        trace!("{} | -> Failed", self.get_stats());
+        trace!("{} | -> Failed", self.get_stats().0);
         self.web_transport.state = ConnectionState::Failed;
         self.quinn.disconnect();
     }
 
     /// transitions to the connected state and fires the connected event
     fn success(&mut self, handler: &mut impl EndpointEventHandler<WebTransportEndpoint>) {
-        trace!("{} | -> Connected", self.get_stats());
+        trace!("{} | -> Connected", self.get_stats().0);
         self.web_transport.state = ConnectionState::Connected;
         handler.connected(self.connection_id);
     }
@@ -118,7 +118,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                     if let (ConnectionState::ServerWaitConnectStream, true) =
                         (&self.web_transport.state, peer_generated)
                     {
-                        trace!("{} | -> ServerReadConnectRequest", self.get_stats());
+                        trace!("{} | -> ServerReadConnectRequest", self.get_stats().0);
                         self.web_transport.state =
                             ConnectionState::ServerReadConnectRequest(stream_id, Vec::new());
                         continue;
@@ -143,7 +143,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                         (&self.web_transport.state, peer_generated)
                     {
                         // Client opened uni stream to send Settings.
-                        trace!("{} | -> ServerReadSettings", self.get_stats());
+                        trace!("{} | -> ServerReadSettings", self.get_stats().0);
                         self.web_transport.state =
                             ConnectionState::ServerReadSettings(stream_id, Vec::new());
                         continue;
@@ -155,7 +155,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                         // Server opened uni stream to send settings response.
                         trace!(
                             "{} | -> ClientReceiveSettingsResponse",
-                            self.as_ref().get_stats()
+                            self.as_ref().get_stats().0
                         );
                         self.web_transport.state =
                             ConnectionState::ClientReceiveSettingsResponse(stream_id, Vec::new());
@@ -213,7 +213,7 @@ impl<'c> WebTransportConnectionMut<'c> {
                 }
 
                 if buffer.is_empty() {
-                    trace!("{} | -> ClientWaitSettingsResponse", self.get_stats());
+                    trace!("{} | -> ClientWaitSettingsResponse", self.get_stats().0);
                     self.web_transport.state = ConnectionState::ClientWaitSettingsResponse;
                 }
             }
@@ -238,7 +238,7 @@ impl<'c> WebTransportConnectionMut<'c> {
 
                         connect_req.encode(&mut buffer);
 
-                        trace!("{} | -> ClientSendConnect", self.get_stats());
+                        trace!("{} | -> ClientSendConnect", self.get_stats().0);
                         self.web_transport.state =
                             ConnectionState::ClientSendConnect(stream_id, buffer);
                     }
@@ -354,7 +354,8 @@ impl<'c> WebTransportConnectionMut<'c> {
 }
 
 impl<'c> ConnectionMut<'c> for WebTransportConnectionMut<'c> {
-    type NonMut<'b> = WebTransportConnectionRef<'b>
+    type NonMut<'b>
+        = WebTransportConnectionRef<'b>
     where
         Self: 'b;
 
@@ -370,9 +371,9 @@ impl<'c> ConnectionMut<'c> for WebTransportConnectionMut<'c> {
 }
 
 impl<'c> ConnectionRef<'c> for WebTransportConnectionRef<'c> {
-    type ConnectionStats = std::net::SocketAddr;
+    type ConnectionStats = (std::net::SocketAddr, ConnectionStats);
 
-    fn get_stats(&self) -> std::net::SocketAddr {
+    fn get_stats(&self) -> (std::net::SocketAddr, ConnectionStats) {
         self.quinn.get_stats()
     }
 }
