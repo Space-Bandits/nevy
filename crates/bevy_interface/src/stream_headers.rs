@@ -94,11 +94,11 @@ fn initialize_clients(
 
 fn poll_stream_events(
     mut connections: Connections,
-    mut connection_q: Query<(Entity, &mut ConnectionStreamHeaders, &Parent)>,
+    mut connection_q: Query<(Entity, &mut ConnectionStreamHeaders, &ChildOf)>,
     mut event_w: EventWriter<HeaderStreamEvent>,
-) {
+) -> Result<(), BevyError> {
     for (connection_entity, mut headers, connection_parent) in connection_q.iter_mut() {
-        let Some(mut endpoint) = connections.connection_endpoint_mut(connection_entity) else {
+        let Some(mut endpoint) = connections.connection_endpoint_mut(connection_entity)? else {
             error!(
                 "Couldn't query connection {:?}'s endpoint",
                 connection_entity
@@ -147,19 +147,21 @@ fn poll_stream_events(
             }
         }
     }
+
+    Ok(())
 }
 
 fn read_headers(
     mut event_w: EventWriter<HeaderStreamEvent>,
     mut connections: Connections,
-    mut connection_q: Query<(Entity, &mut ConnectionStreamHeaders, &Parent)>,
-) {
+    mut connection_q: Query<(Entity, &mut ConnectionStreamHeaders, &ChildOf)>,
+) -> Result<(), BevyError> {
     for (connection_entity, mut headers, connection_parent) in connection_q.iter_mut() {
         if headers.uninitialized_streams.len() == 0 {
             continue;
         }
 
-        let Some(mut endpoint) = connections.connection_endpoint_mut(connection_entity) else {
+        let Some(mut endpoint) = connections.connection_endpoint_mut(connection_entity)? else {
             error!(
                 "Couldn't query connection {:?}'s endpoint",
                 connection_entity
@@ -230,6 +232,8 @@ fn read_headers(
                 true
             });
     }
+
+    Ok(())
 }
 
 /// wraps a [BevyStreamId] and will not return

@@ -1,4 +1,8 @@
-use bevy::{prelude::*, utils::HashMap};
+use bevy::{
+    ecs::error::debug,
+    platform::collections::{hash_map::Entry, HashMap},
+    prelude::*,
+};
 use transport_interface::*;
 
 use crate::{
@@ -78,7 +82,7 @@ struct UpdateHandler<'a, 'w, 's, E: Endpoint> {
 pub struct Connections<'w, 's> {
     commands: Commands<'w, 's>,
     endpoint_q: Query<'w, 's, &'static mut BevyEndpoint>,
-    connection_q: Query<'w, 's, &'static Parent, With<BevyConnection>>,
+    connection_q: Query<'w, 's, &'static ChildOf, With<BevyConnection>>,
 }
 
 impl BevyEndpoint {
@@ -129,8 +133,7 @@ where
         };
 
         let entity = commands
-            .spawn(BevyConnection)
-            .set_parent(endpoint_entity)
+            .spawn((BevyConnection, ChildOf(endpoint_entity)))
             .id();
 
         if self.connections.insert(connection_id, entity) {
@@ -176,10 +179,7 @@ impl<C: std::hash::Hash + Eq + Copy> ConnectionMap<C> {
             self.connection_entities.entry(connection_id),
             self.connection_ids.entry(entity),
         ) {
-            (
-                bevy::utils::Entry::Vacant(connection_entry),
-                bevy::utils::Entry::Vacant(entity_entry),
-            ) => {
+            (Entry::Vacant(connection_entry), Entry::Vacant(entity_entry)) => {
                 connection_entry.insert(entity);
                 entity_entry.insert(connection_id);
 
@@ -191,14 +191,13 @@ impl<C: std::hash::Hash + Eq + Copy> ConnectionMap<C> {
 
     /// attempts to remove from the map from a `connection_id`
     fn remove_connection(&mut self, connection_id: C) -> Option<Entity> {
-        let bevy::utils::Entry::Occupied(connection_entry) =
-            self.connection_entities.entry(connection_id)
+        let Entry::Occupied(connection_entry) = self.connection_entities.entry(connection_id)
         else {
             return None;
         };
         let entity = connection_entry.remove();
 
-        let bevy::utils::Entry::Occupied(entity_entry) = self.connection_ids.entry(entity) else {
+        let Entry::Occupied(entity_entry) = self.connection_ids.entry(entity) else {
             unreachable!("A matching entry should always exist in the other map");
         };
         entity_entry.remove();
@@ -233,8 +232,7 @@ where
                 let connection_entity = self
                     .params
                     .commands
-                    .spawn(BevyConnection)
-                    .set_parent(self.endpoint_entity)
+                    .spawn((BevyConnection, ChildOf(self.endpoint_entity)))
                     .id();
 
                 self.connections.insert(connection_id, connection_entity);
@@ -243,7 +241,7 @@ where
             }
         };
 
-        self.params.connected_w.send(Connected {
+        self.params.connected_w.write(Connected {
             endpoint_entity: self.endpoint_entity,
             connection_entity,
         });
@@ -251,9 +249,9 @@ where
 
     fn disconnected(&mut self, connection_id: <E as Endpoint>::ConnectionId) {
         if let Some(connection_entity) = self.connections.remove_connection(connection_id) {
-            self.params.commands.entity(connection_entity).despawn_recursive();
+            self.params.commands.entity(connection_entity).despawn();
 
-            self.params.disconnected_w.send(Disconnected {
+            self.params.disconnected_w.write(Disconnected {
                 endpoint_entity: self.endpoint_entity,
                 connection_entity,
             });
@@ -287,22 +285,22 @@ impl<'w, 's> Connections<'w, 's> {
     pub fn connection_endpoint_mut(
         &mut self,
         connection_entity: Entity,
-    ) -> Option<Mut<BevyEndpoint>> {
+    ) -> Result<Option<Mut<BevyEndpoint>>, BevyError> {
         let Ok(parent) = self.connection_q.get(connection_entity) else {
-            return None;
+            return Ok(None);
         };
 
-        let connection_parent = parent.get();
+        let connection_parent = parent.parent();
 
         let Ok(endpoint) = self.endpoint_q.get_mut(connection_parent) else {
-            error!(
+            return Err(format!(
                 "connection entity {:?}'s parent {:?} wasn't an endpoint",
                 connection_entity, connection_parent
-            );
-            return None;
+            )
+            .into());
         };
 
-        Some(endpoint)
+        Ok(Some(endpoint))
     }
 }
 

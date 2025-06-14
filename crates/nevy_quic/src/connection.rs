@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashSet, VecDeque},
-    time::Duration,
-};
+use std::collections::{HashSet, VecDeque};
 
 use quinn_proto::ConnectionStats;
 use transport_interface::*;

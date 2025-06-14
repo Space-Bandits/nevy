@@ -27,7 +27,7 @@ pub trait Endpoint {
     fn connection<'c>(
         &'c self,
         id: Self::ConnectionId,
-    ) -> Option<<Self::Connection<'c> as ConnectionMut>::NonMut<'c>>;
+    ) -> Option<<Self::Connection<'c> as ConnectionMut<'c>>::NonMut<'c>>;
 
     /// Retrieves a connection reference mutably from the endpoint given its unique id.
     fn connection_mut<'a>(&'a mut self, id: Self::ConnectionId) -> Option<Self::Connection<'a>>;

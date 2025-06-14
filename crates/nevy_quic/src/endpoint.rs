@@ -290,7 +290,7 @@ impl Endpoint for QuinnEndpoint {
     fn connection<'c>(
         &'c self,
         id: Self::ConnectionId,
-    ) -> Option<<Self::Connection<'c> as ConnectionMut>::NonMut<'c>> {
+    ) -> Option<<Self::Connection<'c> as ConnectionMut<'c>>::NonMut<'c>> {
         self.connections.get(&id)
     }
 
