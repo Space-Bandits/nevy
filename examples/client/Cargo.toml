@@ -1,0 +1,12 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.16.1"
+log.workspace = true
+nevy = { path = "../.." }
+nevy_quic = { path = "../../crates/nevy_quic" }
+rustls = { version = "0.23.5", default-features = false, features = ["std"] }
+rcgen = "0.13.1"

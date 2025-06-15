@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "examples/*"]
 resolver = "2"
 
 [package]
@@ -11,20 +11,13 @@ description = "Simple, expressive networking for your bevy games"
 keywords = ["netcode", "networking", "bevy"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/DrewRidley/nevy"
+repository = "https://github.com/space-bandits/nevy"
 documentation = "https://docs.rs/nevy"
 
-[features]
-quic = ["nevy_quic"]
-web_transport = ["nevy_web_transport"]
-
 [dependencies]
-transport_interface.path = "./crates/transport_interface"
-bevy_interface.path = "./crates/bevy_interface"
-nevy_messaging.path = "./crates/nevy_messaging"
-nevy_quic = { path = "./crates/nevy_quic", optional = true }
-nevy_web_transport = { path = "./crates/nevy_web_transport", optional = true }
-log = "0.4.21"
+bevy.workspace = true
+log.workspace = true
 
 [workspace.dependencies]
-bevy = { version = "0.16", default-features = false }
+bevy = { version = "0.16.1", default-features = false }
+log = "0.4.27"
