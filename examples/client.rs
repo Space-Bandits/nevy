@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use nevy::{
-    AlwaysRejectIncoming, ConnectionOf, ConnectionStatus, NevyPlugin, QuicConnection,
-    QuicConnectionConfig, QuicEndpoint,
-};
+use nevy::*;
 
 fn main() {
     let mut app = App::new();
@@ -54,12 +51,12 @@ fn send_message(
         let connection = endpoint.get_connection(connection)?;
 
         let stream_id = connection
-            .open_uni_stream()
+            .open_stream(Direction::Uni)
             .ok_or("Streams should not be exhausted")?;
 
-        connection.stream_write(stream_id, "Hello Server!".as_bytes())?;
+        connection.write_send_stream(stream_id, "Hello Server!".as_bytes())?;
 
-        connection.finish_stream(stream_id)?;
+        connection.finish_send_stream(stream_id)?;
         info!("Connection established, sent message");
     }
 
@@ -79,7 +76,7 @@ fn close_connection(
 
         let connection = endpoint.get_connection(connection)?;
 
-        if connection.open_send_streams() == 0 {
+        if connection.get_open_send_streams() == 0 {
             connection.close(0, default())?;
 
             info!("all data sent, closing connection")

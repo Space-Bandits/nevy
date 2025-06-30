@@ -1,8 +1,5 @@
 use bevy::prelude::*;
-use nevy::{
-    AlwaysAcceptIncoming, Chunk, ConnectionOf, NevyPlugin, QuicConnection, QuicEndpoint, StreamId,
-    StreamReadError,
-};
+use nevy::*;
 
 fn main() {
     let mut app = App::new();
@@ -54,7 +51,7 @@ fn receive_messages(
             continue;
         };
 
-        while let Some(stream_id) = connection.accept_uni_stream() {
+        while let Some(stream_id) = connection.accept_stream(Direction::Uni) {
             streams.streams.push((stream_id, Vec::new()));
         }
 
@@ -67,7 +64,7 @@ fn receive_messages(
         streams
             .streams
             .retain_mut(|&mut (stream_id, ref mut buffer)| loop {
-                match connection.stream_read(stream_id, usize::MAX, true) {
+                match connection.read_recv_stream(stream_id, usize::MAX, true) {
                     Ok(Some(Chunk { data, .. })) => buffer.extend(data),
                     Ok(None) => break false,
                     Err(StreamReadError::Blocked) => break true,

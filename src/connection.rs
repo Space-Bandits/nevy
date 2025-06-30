@@ -27,47 +27,36 @@ impl ConnectionState {
         self.stream_events.pop_front()
     }
 
-    /// Accepts a new unidirectional stream if one is available.
-    pub fn accept_uni_stream(&mut self) -> Option<StreamId> {
+    /// Accepts a new stream of a certain direction if one is available.
+    pub fn accept_stream(&mut self, direction: Direction) -> Option<StreamId> {
         self.connection
             .streams()
-            .accept(quinn_proto::Dir::Uni)
+            .accept(direction.into())
             .map(|stream_id| StreamId(stream_id))
     }
 
-    /// Accepts a new bidirectional stream if one is available.
-    pub fn accept_bi_stream(&mut self) -> Option<StreamId> {
-        self.connection
-            .streams()
-            .accept(quinn_proto::Dir::Bi)
-            .map(|stream_id| StreamId(stream_id))
-    }
-
-    /// Attempts to open a new unidirectional stream.
+    /// Attempts to open a new stream of a certain direction.
     ///
     /// Fails if the maximum number of these streams has been reached.
-    pub fn open_uni_stream(&mut self) -> Option<StreamId> {
+    pub fn open_stream(&mut self, direction: Direction) -> Option<StreamId> {
         self.connection
             .streams()
-            .open(quinn_proto::Dir::Uni)
+            .open(direction.into())
             .map(|stream_id| StreamId(stream_id))
     }
 
-    /// Attempts to open a new bidirectional stream.
-    ///
-    /// Fails if the maximum number of these streams has been reached.
-    pub fn open_bi_stream(&mut self) -> Option<StreamId> {
-        self.connection
-            .streams()
-            .open(quinn_proto::Dir::Bi)
-            .map(|stream_id| StreamId(stream_id))
-    }
-
-    /// Returns the number of open send streams.
+    /// Returns the number of send streams that may have unacknowledged data.
     ///
     /// Can be used to determine if there is outstanding data that has not been transmitted.
-    pub fn open_send_streams(&mut self) -> usize {
+    pub fn get_open_send_streams(&mut self) -> usize {
         self.connection.streams().send_streams()
+    }
+
+    /// Gets the number of remotely opened streams of a certain direction.
+    pub fn get_open_remote_streams(&mut self, direction: Direction) -> u64 {
+        self.connection
+            .streams()
+            .remote_open_streams(direction.into())
     }
 
     /// Sets the maximum number of concurrent streams that the peer can open in a certain direction.
@@ -86,7 +75,7 @@ impl ConnectionState {
     }
 
     /// Sets the priority of a send stream.
-    pub fn set_stream_priority(
+    pub fn set_send_stream_priority(
         &mut self,
         StreamId(stream_id): StreamId,
         priority: i32,
@@ -98,7 +87,7 @@ impl ConnectionState {
     }
 
     /// Gets the priority of a send stream.
-    pub fn get_stream_priority(
+    pub fn get_send_stream_priority(
         &mut self,
         StreamId(stream_id): StreamId,
     ) -> Result<i32, ClosedStreamError> {
@@ -111,7 +100,7 @@ impl ConnectionState {
     /// Attempts to write some data to a stream.
     ///
     /// If successful returns the number of bytes that were successfully written.
-    pub fn stream_write(
+    pub fn write_send_stream(
         &mut self,
         StreamId(stream_id): StreamId,
         data: &[u8],
@@ -136,7 +125,7 @@ impl ConnectionState {
     /// If the stream is blocked on waiting for more data [StreamReadError::Blocked] will be returned.
     ///
     /// If an out of order read is attempted, only out of order reads are valid from that point on.
-    pub fn stream_read(
+    pub fn read_recv_stream(
         &mut self,
         StreamId(stream_id): StreamId,
         max_size: usize,
@@ -172,8 +161,8 @@ impl ConnectionState {
         }))
     }
 
-    /// Will finish a send stream
-    pub fn finish_stream(
+    /// Finishes a send stream
+    pub fn finish_send_stream(
         &mut self,
         StreamId(stream_id): StreamId,
     ) -> Result<(), StreamFinishError> {
@@ -189,7 +178,7 @@ impl ConnectionState {
     }
 
     /// Abandon transmitting data on a send stream
-    pub fn reset_stream(
+    pub fn reset_send_stream(
         &mut self,
         StreamId(stream_id): StreamId,
         code: u64,
@@ -210,7 +199,7 @@ impl ConnectionState {
     }
 
     /// Will tell the peer to stop sending data on a recv stream
-    pub fn stop_stream(
+    pub fn stop_recv_stream(
         &mut self,
         StreamId(stream_id): StreamId,
         code: u64,
@@ -231,7 +220,7 @@ impl ConnectionState {
     }
 
     /// Checks if a send stream has been stopped by the peer, returns the code if it was.
-    pub fn stream_stopped(
+    pub fn send_stream_stopped(
         &mut self,
         StreamId(stream_id): StreamId,
     ) -> Result<Option<u64>, ClosedStreamError> {
@@ -242,7 +231,7 @@ impl ConnectionState {
             .map_err(|quinn_proto::ClosedStream { .. }| ClosedStreamError)
     }
 
-    /// Closes the stream in the next update
+    /// Closes the connection in the next update
     ///
     /// Will do nothing if the stream has already been closed.
     pub fn close(&mut self, code: u64, reason: Box<[u8]>) -> Result<(), VarIntBoundsExceeded> {
@@ -259,11 +248,24 @@ impl ConnectionState {
         Ok(())
     }
 
-    pub fn max_size_datagram(&mut self) -> Option<usize> {
+    /// Gets the maximum size datagram that can be sent.
+    pub fn get_datagram_max_size(&mut self) -> Option<usize> {
         self.connection.datagrams().max_size()
     }
 
-    pub fn write_datagram(
+    /// Gets the amount of space available in the datagram send buffer.
+    ///
+    /// When greater than zero, sending a datagram of at most this size is guaranteed not to cause older datagrams to be dropped.
+    pub fn get_datagram_send_buffer_space(&mut self) -> usize {
+        self.connection.datagrams().send_buffer_space()
+    }
+
+    /// Attempts to write an unreliable unordered datagram to an internal buffer.
+    ///
+    /// If `drop_old` is true the oldest datagram in the buffer will be dropped if more space is needed.
+    ///
+    /// If `drop_old` is false and the buffer is full [SendDatagramError::Blocked] will be returned.
+    pub fn send_datagram(
         &mut self,
         data: Box<[u8]>,
         drop_old: bool,
@@ -281,11 +283,16 @@ impl ConnectionState {
         }
     }
 
+    /// Take the next unordered unreliable datagram from the receive buffer.
     pub fn receive_datagram(&mut self) -> Option<Box<[u8]>> {
         self.connection
             .datagrams()
             .recv()
             .map(|data| Vec::from(data).into())
+    }
+
+    pub fn accept_uni_stream(&self) -> Option<StreamId> {
+        todo!()
     }
 }
 

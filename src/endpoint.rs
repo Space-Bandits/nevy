@@ -7,7 +7,6 @@ use std::{
 };
 
 use bevy::{platform::collections::HashMap, prelude::*};
-use log::{debug, error, info, warn};
 
 pub use quinn_proto;
 pub use quinn_proto::ClientConfig;
@@ -51,9 +50,14 @@ pub struct QuicEndpoint {
 
 /// Component that exists on an entity when it is a [ConnectionOf] a [QuicEndpoint].
 ///
-/// Used to identify the quic connection state within it's connected endpoint.
+/// Used to identify the quic connection state within it's associated endpoint.
 ///
-/// This component existing does not mean the connection is established, see [ConnectionStatus].
+/// This component existing does not mean the connection is established.
+/// Use [ConnectionStatus] to respond to the connecting, established and closed lifecycle stages.
+///
+/// This component will not be removed when the connection is closed, this is your responsibility.
+/// Removing this component by removing the [ConnectionOf](crate::ConnectionOf)
+/// will close the connection with a code of `0` and an empty reason.
 #[derive(Component)]
 #[component(immutable)]
 #[require(ConnectionStatus)]
@@ -68,76 +72,68 @@ pub struct QuicConnection {
 #[derive(Component, Default)]
 #[component(immutable)]
 pub enum ConnectionStatus {
+    /// The initial state for a [QuicConnection].
     #[default]
     Connecting,
+    /// The connection is established and ready to use.
     Established,
+    /// The connection is closed.
+    /// You may still be able to get the connection state from the [QuicEndpoint] if there is unread data,
+    /// otherwise the [ConnectionOf] component can be removed without losing data.
     Closed {
         reason: quinn_proto::ConnectionError,
     },
+    /// The connection enters this state when the [QuicEndpoint] couldn't open a connection.
+    ///
+    /// In this case no [QuicEndpoint] component will exist
+    Failed { error: quinn_proto::ConnectError },
 }
 
-pub(crate) fn new_connection_observer(
+pub(crate) fn inserted_connection_of_observer(
     trigger: Trigger<NewConnectionOf>,
     mut commands: Commands,
     mut endpoint_q: Query<&mut QuicEndpoint>,
     connection_q: Query<(Option<&QuicConnectionConfig>, Has<QuicConnection>)>,
-) {
+) -> Result {
     let endpoint_entity = trigger.target();
     let connection_entity = trigger.event().0;
 
     // confirm that the endpoint has the right components
-    let Ok(mut endpoint) = endpoint_q.get_mut(endpoint_entity) else {
-        error!(
-            "ConnectionOf {} was related to EndpointOf {} which does not have a QuicEndpoint",
-            connection_entity, endpoint_entity
-        );
+    let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
 
-        return;
-    };
+    let (config, opened_by_endpoint) = connection_q.get(connection_entity)?;
 
-    let Ok((config, opened_by_endpoint)) = connection_q.get(connection_entity) else {
-        return;
-    };
+    if !opened_by_endpoint {
+        // this connection was inserted by the application. Open a connection
 
-    if opened_by_endpoint {
-        // this connection was created by the endpoint accepting a connection
-
-        debug!(
-            "accepted new connection {} on endpoint {}",
-            connection_entity, endpoint_entity
-        );
-    } else {
-        // this connection was created to instruct the endpoint to open a connection
-
-        let Some(connection_config) = config else {
-            error!(
-                "No connection config provided for quic connection {}. Removing connection.",
-                connection_entity
-            );
-
+        let connection_config = config.ok_or_else(|| {
             commands.entity(connection_entity).remove::<ConnectionOf>();
 
-            return;
-        };
+            format!(
+                "No connection config provided for quic connection {}. Removing `ConnectionOf`",
+                connection_entity
+            )
+        })?;
 
-        // commands.entity(connection_entity).insert(QuicConnection {
-        //     connection_handle: None,
-        // });
-
-        let Ok((connection_handle, connection)) = endpoint.endpoint.connect(
+        let (connection_handle, connection) = match endpoint.endpoint.connect(
             Instant::now(),
             connection_config.client_config.clone(),
             connection_config.address,
             &connection_config.server_name,
-        ) else {
-            warn!(
-                "Failed to open connection to {} {}",
-                connection_config.address, connection_config.server_name
-            );
+        ) {
+            Ok(connection) => connection,
+            Err(error) => {
+                warn!(
+                    "Failed to open connection to {} {}",
+                    connection_config.address, connection_config.server_name
+                );
 
-            commands.entity(connection_entity).remove::<ConnectionOf>();
+                commands
+                    .entity(connection_entity)
+                    .insert(ConnectionStatus::Failed { error });
 
-            return;
+                return Ok(());
+            }
         };
 
         endpoint.connections.insert(
@@ -153,20 +149,17 @@ pub(crate) fn new_connection_observer(
         commands
             .entity(connection_entity)
             .insert(QuicConnection { connection_handle });
-
-        debug!(
-            "opened new connection {} on endpoint {}",
-            connection_entity, endpoint_entity
-        );
     }
+
+    Ok(())
 }
 
-pub(crate) fn removed_connection_observer(
+pub(crate) fn removed_connection_of_observer(
     trigger: Trigger<RemovedConnectionOf>,
     mut commands: Commands,
     mut endpoint_q: Query<&mut QuicEndpoint>,
     mut connection_q: Query<&QuicConnection>,
-) {
+) -> Result {
     let endpoint_entity = trigger.target();
     let connection_entity = trigger.event().0;
 
@@ -176,35 +169,40 @@ pub(crate) fn removed_connection_observer(
         .try_remove::<QuicConnection>()
         .try_remove::<ConnectionStatus>();
 
+    // attempt to
     let Ok(mut endpoint) = endpoint_q.get_mut(endpoint_entity) else {
-        return;
+        return Ok(());
     };
 
     let Ok(connection) = connection_q.get_mut(connection_entity) else {
-        return;
+        return Ok(());
     };
 
-    endpoint.connections.remove(&connection.connection_handle);
+    let Ok(connection) = endpoint.get_connection(connection) else {
+        // there may not be connection state.
+        return Ok(());
+    };
+
+    connection.close(0, default())?;
+
+    // TODO: mark that the data will never be read and the connection state can be freed.
+
+    Ok(())
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct EndpointUpdateParams<'w, 's> {
+pub(crate) struct EndpointUpdateContext<'w, 's> {
+    endpoint_entity: Entity,
     commands: Commands<'w, 's>,
 }
 
-pub(crate) struct EndpointUpdateContext<'p, 'w, 's> {
-    endpoint_entity: Entity,
-    params: &'p mut EndpointUpdateParams<'w, 's>,
-}
-
 pub(crate) fn update_endpoints(
-    mut update_params: EndpointUpdateParams,
+    mut commands: Commands,
     mut endpoint_q: Query<(Entity, &mut QuicEndpoint)>,
 ) {
     for (endpoint_entity, mut endpoint) in endpoint_q.iter_mut() {
         endpoint.update(EndpointUpdateContext {
             endpoint_entity,
-            params: &mut update_params,
+            commands: commands.reborrow(),
         });
     }
 }
@@ -413,7 +411,6 @@ impl QuicEndpoint {
             Err(err) => return err.response,
             Ok((connection_handle, connection)) => {
                 let connection_entity = context
-                    .params
                     .commands
                     .spawn((
                         ConnectionOf(context.endpoint_entity),
@@ -446,7 +443,6 @@ impl QuicEndpoint {
                     .close(Instant::now(), code, reason.into());
 
                 context
-                    .params
                     .commands
                     .entity(connection.connection_entity)
                     .insert(ConnectionStatus::Closed {
@@ -500,19 +496,15 @@ impl QuicEndpoint {
                     quinn_proto::Event::HandshakeDataReady => {}
                     quinn_proto::Event::Connected => {
                         context
-                            .params
                             .commands
                             .entity(connection.connection_entity)
                             .insert(ConnectionStatus::Established);
                     }
                     quinn_proto::Event::ConnectionLost { reason } => {
                         context
-                            .params
                             .commands
                             .entity(connection.connection_entity)
                             .insert(ConnectionStatus::Closed { reason });
-
-                        info!("Connection closed");
                     }
                     quinn_proto::Event::Stream(event) => {
                         connection.stream_events.push_back(event.into());
@@ -520,10 +512,6 @@ impl QuicEndpoint {
                     quinn_proto::Event::DatagramReceived => {}
                     quinn_proto::Event::DatagramsUnblocked => {}
                 }
-            }
-
-            if drop_connection_state {
-                info!("The connection state has been dropped");
             }
 
             !drop_connection_state

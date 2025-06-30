@@ -28,11 +28,15 @@ pub use endpoint::{
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct UpdateEndpoints;
 
+/// Plugin which adds observers and update systems for quic endpoints and connections.
+///
+/// The default schedule for network updates is `PostUpdate`.
 pub struct NevyPlugin {
     schedule: Interned<dyn ScheduleLabel>,
 }
 
 impl NevyPlugin {
+    /// Creates a new plugin with updates happening in a specified schedule.
     pub fn new(schedule: impl ScheduleLabel) -> Self {
         NevyPlugin {
             schedule: schedule.intern(),
@@ -48,8 +52,8 @@ impl Default for NevyPlugin {
 
 impl Plugin for NevyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(endpoint::new_connection_observer);
-        app.add_observer(endpoint::removed_connection_observer);
+        app.add_observer(endpoint::inserted_connection_of_observer);
+        app.add_observer(endpoint::removed_connection_of_observer);
 
         app.add_systems(
             self.schedule,
@@ -57,13 +61,15 @@ impl Plugin for NevyPlugin {
         );
     }
 }
+
+/// Relationship target for all [ConnectionOf]s for a [QuicEndpoint]
 #[derive(Component, Default)]
 #[relationship_target(relationship = ConnectionOf)]
 pub struct EndpointOf(Vec<Entity>);
 
 /// This component represents a connection on a [QuicEndpoint].
 ///
-/// Insert this component to open a connection.
+/// Insert this component along with a [QuicConnectionConfig] to open a connection.
 #[derive(Deref)]
 pub struct ConnectionOf(pub Entity);
 
@@ -107,13 +113,13 @@ impl Relationship for ConnectionOf {
     }
 }
 
-/// Event that is triggered when a new [ConnectionOf] component is inserted.
-/// The target is the associated endpoint.
+/// Observer event that is triggered when a new [ConnectionOf] component is inserted.
+/// The target entity is the associated endpoint.
 #[derive(Event)]
 pub struct NewConnectionOf(pub Entity);
 
-/// Event that is triggered when a [ConnectionOf] component is removed.
-/// The target is the associated endpoint.
+/// Observer event that is triggered when a [ConnectionOf] component is removed.
+/// The target entity is the associated endpoint.
 #[derive(Event)]
 pub struct RemovedConnectionOf(pub Entity);
 
