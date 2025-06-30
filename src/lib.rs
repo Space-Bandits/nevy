@@ -1,24 +1,71 @@
 use bevy::{
     ecs::{
         component::{ComponentHook, HookContext, StorageType},
+        intern::Interned,
         relationship::Relationship,
+        schedule::ScheduleLabel,
         world::DeferredWorld,
     },
     prelude::*,
 };
 
+pub use quinn_proto;
+
+mod connection;
+mod endpoint;
+
+pub use connection::{
+    Chunk, ConnectionState, ResetStreamError, StopStreamError, StreamEvent, StreamFinishError,
+    StreamId, StreamReadError, StreamWriteError, VarIntBoundsExceeded,
+};
+
+pub use endpoint::{
+    ConnectionStatus, IncomingConnectionHandler, NoConnectionState, QuicConnection,
+    QuicConnectionConfig, QuicEndpoint,
+};
+
+/// System set where quic endpoints are updated and packets are sent and received.
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
+pub struct UpdateEndpoints;
+
+pub struct NevyPlugin {
+    schedule: Interned<dyn ScheduleLabel>,
+}
+
+impl NevyPlugin {
+    pub fn new(schedule: impl ScheduleLabel) -> Self {
+        NevyPlugin {
+            schedule: schedule.intern(),
+        }
+    }
+}
+
+impl Default for NevyPlugin {
+    fn default() -> Self {
+        Self::new(PostUpdate)
+    }
+}
+
+impl Plugin for NevyPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_observer(endpoint::new_connection_observer);
+        app.add_observer(endpoint::removed_connection_observer);
+
+        app.add_systems(
+            self.schedule,
+            endpoint::update_endpoints.in_set(UpdateEndpoints),
+        );
+    }
+}
 #[derive(Component, Default)]
 #[relationship_target(relationship = ConnectionOf)]
 pub struct EndpointOf(Vec<Entity>);
 
+/// This component represents a connection on a [QuicEndpoint].
+///
+/// Insert this component to open a connection.
 #[derive(Deref)]
 pub struct ConnectionOf(pub Entity);
-
-impl Default for ConnectionOf {
-    fn default() -> Self {
-        ConnectionOf(Entity::PLACEHOLDER)
-    }
-}
 
 impl Component for ConnectionOf {
     const STORAGE_TYPE: StorageType = StorageType::SparseSet;
@@ -69,3 +116,58 @@ pub struct NewConnectionOf(pub Entity);
 /// The target is the associated endpoint.
 #[derive(Event)]
 pub struct RemovedConnectionOf(pub Entity);
+
+/// The directionality of a stream
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Direction {
+    Bi,
+    Uni,
+}
+
+impl From<quinn_proto::Dir> for Direction {
+    fn from(dir: quinn_proto::Dir) -> Self {
+        match dir {
+            quinn_proto::Dir::Bi => Direction::Bi,
+            quinn_proto::Dir::Uni => Direction::Uni,
+        }
+    }
+}
+
+impl From<Direction> for quinn_proto::Dir {
+    fn from(direction: Direction) -> Self {
+        match direction {
+            Direction::Bi => quinn_proto::Dir::Bi,
+            Direction::Uni => quinn_proto::Dir::Uni,
+        }
+    }
+}
+
+/// This type implements [IncomingConnectionHandler] and will always accept incoming connections.
+pub struct AlwaysAcceptIncoming;
+
+impl IncomingConnectionHandler for AlwaysAcceptIncoming {
+    fn request(&mut self, _incoming: &quinn_proto::Incoming) -> bool {
+        true
+    }
+}
+
+impl AlwaysAcceptIncoming {
+    pub fn new() -> Box<dyn IncomingConnectionHandler> {
+        Box::new(AlwaysAcceptIncoming)
+    }
+}
+
+/// This type implements [IncomingConnectionHandler] and will always reject incoming connections.
+pub struct AlwaysRejectIncoming;
+
+impl IncomingConnectionHandler for AlwaysRejectIncoming {
+    fn request(&mut self, _incoming: &quinn_proto::Incoming) -> bool {
+        false
+    }
+}
+
+impl AlwaysRejectIncoming {
+    pub fn new() -> Box<dyn IncomingConnectionHandler> {
+        Box::new(AlwaysRejectIncoming)
+    }
+}
