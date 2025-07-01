@@ -57,7 +57,7 @@ pub struct QuicEndpoint {
 ///
 /// This component will not be removed when the connection is closed, this is your responsibility.
 /// Removing this component by removing the [ConnectionOf](crate::ConnectionOf)
-/// will close the connection with a code of `0` and an empty reason.
+/// will drop the connection ungracefully.
 #[derive(Component)]
 #[component(immutable)]
 #[require(ConnectionStatus)]
@@ -158,34 +158,46 @@ pub(crate) fn removed_connection_of_observer(
     trigger: Trigger<RemovedConnectionOf>,
     mut commands: Commands,
     mut endpoint_q: Query<&mut QuicEndpoint>,
-    mut connection_q: Query<&QuicConnection>,
 ) -> Result {
     let endpoint_entity = trigger.target();
     let connection_entity = trigger.event().0;
 
-    // remove the quic connection component
+    // remove associated components
     commands
         .entity(connection_entity)
-        .try_remove::<QuicConnection>()
-        .try_remove::<ConnectionStatus>();
+        .try_remove::<QuicConnection>();
 
-    // attempt to
+    // ungracefully drop the connection state
+
     let Ok(mut endpoint) = endpoint_q.get_mut(endpoint_entity) else {
         return Ok(());
     };
 
-    let Ok(connection) = connection_q.get_mut(connection_entity) else {
-        return Ok(());
-    };
+    if let Some((connection_handle, already_drained)) =
+        endpoint
+            .connections
+            .iter()
+            .find_map(|(connection_handle, connection)| {
+                if connection.connection_entity != connection_entity {
+                    return None;
+                }
 
-    let Ok(connection) = endpoint.get_connection(connection) else {
-        // there may not be connection state.
-        return Ok(());
-    };
+                Some((*connection_handle, connection.connection.is_drained()))
+            })
+    {
+        if !already_drained {
+            warn!(
+                "Connection {} on endpoint {} was ungracefully dropped",
+                connection_entity, endpoint_entity
+            );
 
-    connection.close(0, default())?;
+            endpoint
+                .endpoint
+                .handle_event(connection_handle, quinn_proto::EndpointEvent::drained());
+        }
 
-    // TODO: mark that the data will never be read and the connection state can be freed.
+        endpoint.connections.remove(&connection_handle);
+    }
 
     Ok(())
 }
@@ -244,10 +256,7 @@ impl QuicEndpoint {
         self.incoming_handler = incoming_handler.into();
     }
 
-    /// Gets the connection state for a [QuicConnection]
-    ///
-    /// A state will always exist for a [Connecting](ConnectionStatus::Connecting) and [Established](ConnectionStatus::Established) connection,
-    /// but might not for a [Closed](ConnectionStatus::Closed) connection.
+    /// Gets the connection state for a [QuicConnection] associated with this endpoint.
     pub fn get_connection(
         &mut self,
         connection: &QuicConnection,
@@ -436,7 +445,7 @@ impl QuicEndpoint {
     fn update_connections(&mut self, context: &mut EndpointUpdateContext) {
         let max_gso_datagrams = self.socket_state.gro_segments();
 
-        self.connections.retain(|&connection_handle, connection| {
+        for (&connection_handle, connection) in self.connections.iter_mut() {
             if let Some((code, reason)) = connection.close.take() {
                 connection
                     .connection
@@ -476,13 +485,7 @@ impl QuicEndpoint {
                 }
             }
 
-            let mut drop_connection_state = false;
-
             while let Some(endpoint_event) = connection.connection.poll_endpoint_events() {
-                if endpoint_event.is_drained() {
-                    drop_connection_state = true;
-                }
-
                 if let Some(connection_event) = self
                     .endpoint
                     .handle_event(connection_handle, endpoint_event)
@@ -513,9 +516,7 @@ impl QuicEndpoint {
                     quinn_proto::Event::DatagramsUnblocked => {}
                 }
             }
-
-            !drop_connection_state
-        });
+        }
     }
 }
 

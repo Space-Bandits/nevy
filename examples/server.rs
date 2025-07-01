@@ -73,6 +73,8 @@ fn receive_messages(
                         break false;
                     }
                 }
+
+                break true;
             });
     }
 

@@ -6,7 +6,8 @@ use thiserror::Error;
 
 use crate::Direction;
 
-/// The state for a connection accessed through a [QuicEndpoint](crate::endpoint::QuicEndpoint) using a [QuicConnection](crate::connection::QuicConnection) component.
+/// The state for a connection accessed through a [QuicEndpoint](crate::endpoint::QuicEndpoint)
+/// using a [QuicConnection](crate::connection::QuicConnection) component.
 pub struct ConnectionState {
     pub(crate) connection_entity: Entity,
     pub(crate) connection: quinn_proto::Connection,
