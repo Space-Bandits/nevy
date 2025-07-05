@@ -9,10 +9,10 @@ use bevy::{
     prelude::*,
 };
 
-pub use quinn_proto;
-
 mod connection;
 mod endpoint;
+
+pub use quinn_proto::{self, Dir};
 
 pub use connection::{
     Chunk, ConnectionState, ResetStreamError, StopStreamError, StreamEvent, StreamFinishError,
@@ -66,6 +66,21 @@ impl Plugin for NevyPlugin {
 #[derive(Component, Default)]
 #[relationship_target(relationship = ConnectionOf)]
 pub struct EndpointOf(Vec<Entity>);
+
+impl EndpointOf {
+    pub fn iter(&self) -> std::slice::Iter<'_, Entity> {
+        self.0.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a EndpointOf {
+    type Item = &'a Entity;
+    type IntoIter = std::slice::Iter<'a, Entity>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
 
 /// This component represents a connection on a [QuicEndpoint].
 ///
@@ -122,31 +137,6 @@ pub struct NewConnectionOf(pub Entity);
 /// The target entity is the associated endpoint.
 #[derive(Event)]
 pub struct RemovedConnectionOf(pub Entity);
-
-/// The directionality of a stream
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Direction {
-    Bi,
-    Uni,
-}
-
-impl From<quinn_proto::Dir> for Direction {
-    fn from(dir: quinn_proto::Dir) -> Self {
-        match dir {
-            quinn_proto::Dir::Bi => Direction::Bi,
-            quinn_proto::Dir::Uni => Direction::Uni,
-        }
-    }
-}
-
-impl From<Direction> for quinn_proto::Dir {
-    fn from(direction: Direction) -> Self {
-        match direction {
-            Direction::Bi => quinn_proto::Dir::Bi,
-            Direction::Uni => quinn_proto::Dir::Uni,
-        }
-    }
-}
 
 /// This type implements [IncomingConnectionHandler] and will always accept incoming connections.
 pub struct AlwaysAcceptIncoming;

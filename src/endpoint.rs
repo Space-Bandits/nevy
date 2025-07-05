@@ -222,7 +222,7 @@ pub(crate) fn update_endpoints(
 impl QuicEndpoint {
     pub fn new(
         bind_addr: impl ToSocketAddrs,
-        endpoint_config: Option<quinn_proto::EndpointConfig>,
+        endpoint_config: quinn_proto::EndpointConfig,
         server_config: Option<quinn_proto::ServerConfig>,
         incoming_handler: Box<dyn IncomingConnectionHandler>,
     ) -> Result<Self, std::io::Error> {
@@ -230,7 +230,6 @@ impl QuicEndpoint {
         let socket_state = UdpSocketState::new(UdpSockRef::from(&socket))?;
         let local_addr = socket.local_addr()?;
 
-        let endpoint_config = endpoint_config.unwrap_or_default();
         let endpoint = quinn_proto::Endpoint::new(
             Arc::new(endpoint_config.clone()),
             server_config.clone().map(Arc::new),

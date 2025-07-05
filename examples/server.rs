@@ -21,7 +21,7 @@ fn setup(mut commands: Commands) {
     commands.spawn(
         QuicEndpoint::new(
             "0.0.0.0:27518",
-            None,
+            quinn_proto::EndpointConfig::default(),
             Some(create_server_endpoint_config()),
             AlwaysAcceptIncoming::new(),
         )
@@ -51,7 +51,7 @@ fn receive_messages(
             continue;
         };
 
-        while let Some(stream_id) = connection.accept_stream(Direction::Uni) {
+        while let Some(stream_id) = connection.accept_stream(Dir::Uni) {
             streams.streams.push((stream_id, Vec::new()));
         }
 

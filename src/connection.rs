@@ -1,10 +1,8 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use quinn_proto::VarInt;
+use quinn_proto::{Dir, VarInt};
 use thiserror::Error;
-
-use crate::Direction;
 
 /// The state for a connection accessed through a [QuicEndpoint](crate::endpoint::QuicEndpoint)
 /// using a [QuicConnection](crate::connection::QuicConnection) component.
@@ -29,20 +27,20 @@ impl ConnectionState {
     }
 
     /// Accepts a new stream of a certain direction if one is available.
-    pub fn accept_stream(&mut self, direction: Direction) -> Option<StreamId> {
+    pub fn accept_stream(&mut self, direction: Dir) -> Option<StreamId> {
         self.connection
             .streams()
-            .accept(direction.into())
+            .accept(direction)
             .map(|stream_id| StreamId(stream_id))
     }
 
     /// Attempts to open a new stream of a certain direction.
     ///
     /// Fails if the maximum number of these streams has been reached.
-    pub fn open_stream(&mut self, direction: Direction) -> Option<StreamId> {
+    pub fn open_stream(&mut self, direction: Dir) -> Option<StreamId> {
         self.connection
             .streams()
-            .open(direction.into())
+            .open(direction)
             .map(|stream_id| StreamId(stream_id))
     }
 
@@ -54,20 +52,18 @@ impl ConnectionState {
     }
 
     /// Gets the number of remotely opened streams of a certain direction.
-    pub fn get_open_remote_streams(&mut self, direction: Direction) -> u64 {
-        self.connection
-            .streams()
-            .remote_open_streams(direction.into())
+    pub fn get_open_remote_streams(&mut self, direction: Dir) -> u64 {
+        self.connection.streams().remote_open_streams(direction)
     }
 
     /// Sets the maximum number of concurrent streams that the peer can open in a certain direction.
     pub fn set_max_concurrent_streams(
         &mut self,
-        direction: Direction,
+        direction: Dir,
         count: u64,
     ) -> Result<(), VarIntBoundsExceeded> {
         self.connection.set_max_concurrent_streams(
-            direction.into(),
+            direction,
             VarInt::from_u64(count)
                 .map_err(|quinn_proto::VarIntBoundsExceeded| VarIntBoundsExceeded)?,
         );
@@ -305,7 +301,7 @@ pub enum StreamEvent {
     /// One or more new streams has been opened and might be readable
     Opened {
         /// Directionality for which streams have been opened
-        direction: Direction,
+        direction: Dir,
     },
     /// A currently open stream likely has data or errors waiting to be read
     Readable {
@@ -334,7 +330,7 @@ pub enum StreamEvent {
     /// At least one new stream of a certain directionality may be opened
     Available {
         /// Directionality for which streams are newly available
-        direction: Direction,
+        direction: Dir,
     },
 }
 

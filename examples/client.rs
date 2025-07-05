@@ -21,7 +21,15 @@ fn main() {
 
 fn setup(mut commands: Commands) {
     let endpoint_entity = commands
-        .spawn(QuicEndpoint::new("0.0.0.0:0", None, None, AlwaysRejectIncoming::new()).unwrap())
+        .spawn(
+            QuicEndpoint::new(
+                "0.0.0.0:0",
+                quinn_proto::EndpointConfig::default(),
+                None,
+                AlwaysRejectIncoming::new(),
+            )
+            .unwrap(),
+        )
         .id();
 
     commands.spawn((
@@ -42,21 +50,28 @@ fn send_message(
     mut endpoint_q: Query<&mut QuicEndpoint>,
 ) -> Result<(), BevyError> {
     for (connection_of, connection, status) in connection_q.iter() {
+        // only operate on connections that have just changed to established
         let ConnectionStatus::Established = status else {
             continue;
         };
 
+        // get the endpoint component
         let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
+        // get the connection state from the endpoint
         let connection = endpoint.get_connection(connection)?;
 
+        // open a unidirectional stream on the connection.
         let stream_id = connection
-            .open_stream(Direction::Uni)
+            .open_stream(Dir::Uni)
             .ok_or("Streams should not be exhausted")?;
 
+        // write some data
         connection.write_send_stream(stream_id, "Hello Server!".as_bytes())?;
 
+        // finish the stream
         connection.finish_send_stream(stream_id)?;
+
         info!("Connection established, sent message");
     }
 
