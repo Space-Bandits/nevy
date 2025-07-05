@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, net::SocketAddr};
 
 use bevy::prelude::*;
 use quinn_proto::{Dir, VarInt};
@@ -19,6 +19,11 @@ pub struct ConnectionState {
 pub struct StreamId(quinn_proto::StreamId);
 
 impl ConnectionState {
+    /// gets the remote address of the connection
+    pub fn get_remote_address(&self) -> SocketAddr {
+        self.connection.remote_address()
+    }
+
     /// Takes the next stream event from the queue.
     ///
     /// If this function is not called regularly the queue will grow indefinitely.
