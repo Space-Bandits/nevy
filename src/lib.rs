@@ -16,7 +16,7 @@ pub use quinn_proto::{self, Dir};
 
 pub use connection::{
     Chunk, ConnectionState, ResetStreamError, StopStreamError, StreamEvent, StreamFinishError,
-    StreamId, StreamReadError, StreamWriteError, VarIntBoundsExceeded,
+    StreamId, StreamReadError, StreamWriteError, StreamsExhausted, VarIntBoundsExceeded,
 };
 
 pub use endpoint::{

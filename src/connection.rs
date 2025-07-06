@@ -42,7 +42,7 @@ impl ConnectionState {
     /// Attempts to open a new stream of a certain direction.
     ///
     /// Fails if the maximum number of these streams has been reached.
-    pub fn open_stream(&mut self, direction: Dir) -> Option<StreamId> {
+    pub fn open_stream(&mut self, direction: Dir) -> Result<StreamId, StreamsExhausted> {
         self.connection
             .streams()
             .open(direction)
@@ -365,6 +365,11 @@ pub struct Chunk {
     pub offset: u64,
     pub data: Box<[u8]>,
 }
+
+/// An error returned when the maximum number of streams of a given direction has been reached.
+#[derive(Clone, Copy, Debug, Error)]
+#[error("Streams of this direction have been exhausted")]
+pub struct StreamsExhausted;
 
 /// A value was too large for a quic variable length integer
 ///
