@@ -62,9 +62,7 @@ fn send_message(
         let connection = endpoint.get_connection(connection)?;
 
         // open a unidirectional stream on the connection.
-        let stream_id = connection
-            .open_stream(Dir::Uni)
-            .ok_or("Streams should not be exhausted")?;
+        let stream_id = connection.open_stream(Dir::Uni)?;
 
         // write some data
         connection.write_send_stream(stream_id, "Hello Server!".as_bytes())?;

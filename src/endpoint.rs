@@ -8,9 +8,8 @@ use std::{
 
 use bevy::{platform::collections::HashMap, prelude::*};
 
-pub use quinn_proto;
-pub use quinn_proto::ClientConfig;
-use quinn_proto::{ConnectionHandle, DatagramEvent, Incoming};
+use log::{error, warn};
+use quinn_proto::{ClientConfig, ConnectionHandle, DatagramEvent, Incoming};
 use quinn_udp::{UdpSockRef, UdpSocketState};
 use thiserror::Error;
 

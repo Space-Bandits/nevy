@@ -47,6 +47,7 @@ impl ConnectionState {
             .streams()
             .open(direction)
             .map(|stream_id| StreamId(stream_id))
+            .ok_or(StreamsExhausted)
     }
 
     /// Returns the number of send streams that may have unacknowledged data.
