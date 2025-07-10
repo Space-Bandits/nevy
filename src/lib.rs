@@ -37,7 +37,11 @@ pub use headers::{
 };
 
 #[cfg(feature = "messages")]
-pub use messages::{};
+pub use messages::{
+    AddMessage, EndpointWithMessageConnections, MessageId, MessageRecvStreams,
+    MessageSendStreamState, MessageSender, MessageStreamHeader, NevyMessagesPlugin,
+    ReceivedMessages, UpdateMessageSet,
+};
 
 /// System set where quic endpoints are updated and packets are sent and received.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -104,7 +108,7 @@ impl<'a> IntoIterator for &'a EndpointOf {
 pub struct ConnectionOf(pub Entity);
 
 impl Component for ConnectionOf {
-    const STORAGE_TYPE: StorageType = StorageType::SparseSet;
+    const STORAGE_TYPE: StorageType = StorageType::Table;
 
     type Mutability = bevy::ecs::component::Immutable;
 

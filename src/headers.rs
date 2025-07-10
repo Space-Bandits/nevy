@@ -9,13 +9,15 @@ use crate::{
     StreamWriteError, UpdateEndpoints,
 };
 
-/// System set where quic endpoints are updated and packets are sent and received.
+/// System set where streams are accepted and headers are processed.
+///
+/// Happens after [UpdateEndpoints](crate::UpdateEndpoints)
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct UpdateHeaders;
 
-/// Plugin which adds observers and update systems for quic endpoints and connections.
+/// Adds stream header logic to an app.
 ///
-/// The default schedule for network updates is `PostUpdate`.
+/// The default schedule for updates is `PostUpdate`.
 pub struct NevyHeaderPlugin {
     schedule: Interned<dyn ScheduleLabel>,
 }
@@ -37,12 +39,13 @@ impl Default for NevyHeaderPlugin {
 
 impl Plugin for NevyHeaderPlugin {
     fn build(&self, app: &mut App) {
+        app.configure_sets(self.schedule, UpdateHeaders.after(UpdateEndpoints));
+
         app.add_systems(
             self.schedule,
             (insert_stream_header_buffers, read_stream_headers)
                 .chain()
-                .in_set(UpdateHeaders)
-                .after(UpdateEndpoints),
+                .in_set(UpdateHeaders),
         );
     }
 }
