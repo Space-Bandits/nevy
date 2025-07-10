@@ -12,6 +12,12 @@ use bevy::{
 mod connection;
 mod endpoint;
 
+#[cfg(feature = "headers")]
+pub(crate) mod headers;
+
+#[cfg(feature = "messages")]
+pub(crate) mod messages;
+
 pub use quinn_proto::{self, Dir};
 
 pub use connection::{
@@ -23,6 +29,15 @@ pub use endpoint::{
     ConnectionStatus, IncomingConnectionHandler, NoConnectionState, QuicConnection,
     QuicConnectionConfig, QuicEndpoint,
 };
+
+#[cfg(feature = "headers")]
+pub use headers::{
+    EndpointWithHeaderedConnections, HeaderedStreamState, NevyHeaderPlugin, RecvStreamHeaders,
+    UpdateHeaders,
+};
+
+#[cfg(feature = "messages")]
+pub use messages::{};
 
 /// System set where quic endpoints are updated and packets are sent and received.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
