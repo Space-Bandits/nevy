@@ -3,6 +3,7 @@ use bevy::{
     platform::collections::HashMap,
     prelude::*,
 };
+use log::warn;
 
 use crate::{
     ConnectionOf, ConnectionState, Dir, QuicConnection, QuicEndpoint, StreamId, StreamReadError,

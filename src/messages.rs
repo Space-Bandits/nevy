@@ -12,6 +12,7 @@ use bevy::{
     platform::collections::HashMap,
     prelude::*,
 };
+use log::warn;
 use quinn_proto::Dir;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -385,7 +386,7 @@ pub(crate) fn deserialize_messages<T>(
                     message_buffer.messages.push_back(message);
                 }
                 Err(error) => {
-                    error!(
+                    warn!(
                         "Failed to deserialize \"{}\" message: {}",
                         std::any::type_name::<T>(),
                         error
