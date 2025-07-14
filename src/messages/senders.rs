@@ -116,7 +116,7 @@ struct SenderState {
     connections: EntityHashMap<MessageSendStreamState>,
 }
 
-/// System parameter that holds a [Local] send message state machine for each connection.
+/// System parameter that holds a [Local] [MessageSendStreamState] for each connection.
 ///
 /// Should be used when the ordering of messages sent in different systems isn't important
 #[derive(SystemParam)]
@@ -132,7 +132,7 @@ struct SharedMessageSenderState<S> {
     state: SenderState,
 }
 
-/// System parameter that accesses a shared send message state machine for each connection.
+/// System parameter that accesses a shared [MessageSendStreamState] for each connection.
 ///
 /// Should be used when the ordering of messages sent in different systems is important
 #[derive(SystemParam)]
