@@ -38,10 +38,13 @@ pub use headers::{
 
 #[cfg(feature = "messages")]
 pub use messages::{
-    AddMessage, EndpointWithMessageConnections, MessageId, MessageRecvStreams,
-    MessageSendStreamState, MessageSender, MessageStreamHeader, NevyMessagesPlugin,
-    ReceivedMessages, UpdateMessageSet,
+    senders::{AddSharedSender, LocalMessageSender, MessageSendStreamState, SharedMessageSender},
+    AddMessage, EndpointWithMessageConnections, MessageId, MessageRecvStreams, MessageStreamHeader,
+    NevyMessagesPlugin, ReceivedMessages, UpdateMessageSet,
 };
+
+/// The schedule that nevy performs updates in by default
+pub const DEFAULT_NEVY_SCHEDULE: PostUpdate = PostUpdate;
 
 /// System set where quic endpoints are updated and packets are sent and received.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -65,7 +68,7 @@ impl NevyPlugin {
 
 impl Default for NevyPlugin {
     fn default() -> Self {
-        Self::new(PostUpdate)
+        Self::new(DEFAULT_NEVY_SCHEDULE)
     }
 }
 
