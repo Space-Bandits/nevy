@@ -369,6 +369,7 @@ where
     }
 }
 
+/// Trait extension for [App](crate::App) that allows adding a [SharedMessageSender].
 pub trait AddSharedSender {
     /// Adds a [SharedMessageSender] to the app that will flush in a certain schedule.
     ///

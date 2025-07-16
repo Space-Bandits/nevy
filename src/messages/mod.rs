@@ -85,6 +85,7 @@ impl Plugin for NevyMessagesPlugin {
 #[derive(Resource, Default)]
 struct NextMessageId(u16);
 
+/// Trait extension for [App](crate::App) that allows assigning adding messages.
 pub trait AddMessage {
     fn add_message<T>(&mut self)
     where
@@ -92,6 +93,9 @@ pub trait AddMessage {
 }
 
 impl AddMessage for App {
+    /// Assigns a unique id to a message and adds logic for deserializing that type.
+    ///
+    /// The order that messages are added is what defines the protocol and should be identical for both the server and client.
     fn add_message<T>(&mut self)
     where
         T: Serialize + DeserializeOwned,
