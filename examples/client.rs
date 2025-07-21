@@ -48,7 +48,7 @@ fn send_message(
         Changed<ConnectionStatus>,
     >,
     mut endpoint_q: Query<&mut QuicEndpoint>,
-) -> Result<(), BevyError> {
+) -> Result {
     for (connection_of, connection, status) in connection_q.iter() {
         // only operate on connections that have just changed to established
         let ConnectionStatus::Established = status else {
@@ -79,7 +79,7 @@ fn send_message(
 fn close_connection(
     connection_q: Query<(&ConnectionOf, &QuicConnection, &ConnectionStatus)>,
     mut endpoint_q: Query<&mut QuicEndpoint>,
-) -> Result<(), BevyError> {
+) -> Result {
     for (connection_of, connection, status) in connection_q.iter() {
         let ConnectionStatus::Established = status else {
             continue;
