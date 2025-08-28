@@ -6,7 +6,7 @@ categories = ["network-programming", "game-development"]
 description = "QUIC implementation with quinn for the bevy game engine"
 keywords = ["netcode", "networking", "bevy"]
 license = "MIT OR Apache-2.0"
-readme = "README.md"
+readme = "readme.md"
 repository = "https://github.com/space-bandits/nevy"
 documentation = "https://docs.rs/nevy"
 
