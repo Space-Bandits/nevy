@@ -1,12 +1,11 @@
+//! This module is an optional feature used for sending typed messages over a connection.
+//!
+//! Messages operates on top of stream headers on a particular stream id.
+
 use std::{collections::VecDeque, marker::PhantomData};
 
 use bevy::{
-    ecs::{
-        component::{ComponentHook, HookContext, Mutable, StorageType},
-        intern::Interned,
-        schedule::ScheduleLabel,
-        world::DeferredWorld,
-    },
+    ecs::{component::Mutable, intern::Interned, schedule::ScheduleLabel},
     platform::collections::HashMap,
     prelude::*,
 };
@@ -37,23 +36,29 @@ pub enum UpdateMessageSet {
 
 /// Adds message receiving logic to an app.
 ///
-/// The default schedule for updates is `PostUpdate`.
+/// This should be
 pub struct NevyMessagesPlugin {
     schedule: Interned<dyn ScheduleLabel>,
+    message_header: u16,
 }
 
 impl NevyMessagesPlugin {
-    /// Creates a new plugin with updates happening in a specified schedule.
-    pub fn new(schedule: impl ScheduleLabel) -> Self {
+    /// Constructs the plugin. You must provide which stream header to receive messages on.
+    ///
+    /// The default schedule for updates is `PostUpdate`, use [Self::new_with_schedule] to change this.
+    pub fn new(message_header: impl Into<u16>) -> Self {
         NevyMessagesPlugin {
-            schedule: schedule.intern(),
+            schedule: PostUpdate.intern(),
+            message_header: message_header.into(),
         }
     }
-}
 
-impl Default for NevyMessagesPlugin {
-    fn default() -> Self {
-        Self::new(PostUpdate)
+    /// Creates a new plugin with updates happening in a specified schedule.
+    pub fn new_with_schedule(message_header: impl Into<u16>, schedule: impl ScheduleLabel) -> Self {
+        NevyMessagesPlugin {
+            schedule: schedule.intern(),
+            message_header: message_header.into(),
+        }
     }
 }
 
@@ -69,6 +74,8 @@ impl Plugin for NevyMessagesPlugin {
                 .chain()
                 .after(UpdateEndpoints),
         );
+
+        app.insert_resource(MessageStreamHeader(self.message_header));
 
         app.add_systems(
             self.schedule,
@@ -95,7 +102,8 @@ pub trait AddMessage {
 impl AddMessage for App {
     /// Assigns a unique id to a message and adds logic for deserializing that type.
     ///
-    /// The order that messages are added is what defines the protocol and should be identical for both the server and client.
+    /// The order that messages are added to an app is what defines the protocol and should be identical for both the server and client.
+    /// The best way of accomplishing this would be through a function or plugin that is in a shared dependency both binaries.
     fn add_message<T>(&mut self)
     where
         T: Serialize + DeserializeOwned,
@@ -122,20 +130,13 @@ impl AddMessage for App {
 }
 
 /// Holds the unique header id of message streams.
-///
-/// This resource must be inserted for message receiving logic to identify which streams are sending messages.
 #[derive(Resource)]
-pub struct MessageStreamHeader(u16);
+struct MessageStreamHeader(u16);
 
-impl MessageStreamHeader {
-    pub fn new(header: impl Into<u16>) -> Self {
-        MessageStreamHeader(header.into())
-    }
-}
-
-/// Holds the id of a message, needs to be provided when sending a message.
+/// Holds the id of a message.
 ///
-/// Message id's are assigned by using [`app.add_message::<T>()`](AddMessage::add_message)
+/// This resource is added to the app by using [`app.add_message::<T>()`](AddMessage::add_message)
+/// and needs to be provided when sending a message.
 #[derive(Resource)]
 pub struct MessageId<T> {
     _p: PhantomData<T>,
@@ -153,7 +154,7 @@ impl<T> Clone for MessageId<T> {
 
 impl<T> Copy for MessageId<T> {}
 
-/// When this component exists on an endpoint the [MessageRecvStreamStates] component will
+/// When this component exists on an endpoint the [MessageRecvStreams] component will
 /// automatically be inserted onto all new connections of that endpoint.
 #[derive(Component)]
 pub struct EndpointWithMessageConnections;
@@ -165,7 +166,7 @@ pub struct EndpointWithMessageConnections;
 ///
 /// Once deserialized the messages will be inserted into their [ReceivedMessages<T>] component.
 /// These components are automatically inserted when this component is inserted.
-#[derive(Default)]
+#[derive(Component, Default)]
 pub struct MessageRecvStreams {
     streams: HashMap<StreamId, MessageRecvStreamState>,
     messages: HashMap<u16, VecDeque<Box<[u8]>>>,
@@ -187,28 +188,15 @@ enum MessageRecvStreamState {
     },
 }
 
-impl Component for MessageRecvStreams {
-    const STORAGE_TYPE: StorageType = StorageType::Table;
-
-    type Mutability = Mutable;
-
-    fn on_insert() -> Option<ComponentHook> {
-        Some(|mut world: DeferredWorld, hook_context: HookContext| {
-            world.trigger_targets(InsertReceivedMessages, hook_context.entity);
-        })
-    }
-}
-
-#[derive(Event)]
-pub(crate) struct InsertReceivedMessages;
-
 /// Buffer of received messages from all streams for a connection.
+///
+/// If this buffer is not drained it will fill up indefinitely.
 #[derive(Component)]
 pub struct ReceivedMessages<T> {
     messages: VecDeque<T>,
 }
 
-pub(crate) fn insert_recv_stream_buffers(
+fn insert_recv_stream_buffers(
     mut commands: Commands,
     connection_q: Query<(Entity, &ConnectionOf), Added<ConnectionOf>>,
     message_endpoint_q: Query<(), With<EndpointWithMessageConnections>>,
@@ -222,8 +210,8 @@ pub(crate) fn insert_recv_stream_buffers(
     }
 }
 
-pub fn insert_received_message_buffers<T>(
-    trigger: Trigger<InsertReceivedMessages>,
+fn insert_received_message_buffers<T>(
+    trigger: Trigger<OnInsert, MessageRecvStreams>,
     mut commands: Commands,
 ) where
     ReceivedMessages<T>: Component,
@@ -235,7 +223,7 @@ pub fn insert_received_message_buffers<T>(
         });
 }
 
-pub(crate) fn take_message_streams(
+fn take_message_streams(
     mut connection_q: Query<(Entity, &mut RecvStreamHeaders, &mut MessageRecvStreams)>,
     message_stream_header: Res<MessageStreamHeader>,
 ) {
@@ -258,7 +246,7 @@ pub(crate) fn take_message_streams(
     }
 }
 
-pub(crate) fn read_message_streams(
+fn read_message_streams(
     mut connection_q: Query<(
         Entity,
         &ConnectionOf,
@@ -370,7 +358,7 @@ pub(crate) fn read_message_streams(
     Ok(())
 }
 
-pub(crate) fn deserialize_messages<T>(
+fn deserialize_messages<T>(
     message_id: Res<MessageId<T>>,
     mut connection_q: Query<(&mut MessageRecvStreams, &mut ReceivedMessages<T>)>,
 ) where
@@ -401,10 +389,12 @@ pub(crate) fn deserialize_messages<T>(
 }
 
 impl<T> ReceivedMessages<T> {
+    /// Removes all messages from the buffer and returns an iterator over them.
     pub fn drain(&mut self) -> impl Iterator<Item = T> + '_ {
         self.messages.drain(..)
     }
 
+    /// Removes the next message from the buffer and returns it if it exists.
     pub fn next(&mut self) -> Option<T> {
         self.messages.pop_front()
     }

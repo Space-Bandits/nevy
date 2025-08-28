@@ -1,3 +1,12 @@
+//! This module is an optional feature for marking streams with headers.
+//!
+//! If you are using streams for multiple parts of your app you need a way of identifying them when they are accepted.
+//!
+//! This module provides some state machines for sending and receiving a [u16] at the beggining of every stream to identify them.
+//!
+//! Any connection entity with a [RecvStreamHeaders] component will automatically accept new streams and make them available
+//! once their stream header has been received.
+
 use bevy::{
     ecs::{intern::Interned, schedule::ScheduleLabel},
     platform::collections::HashMap,
@@ -103,7 +112,7 @@ enum RecvStreamHeaderState {
     HeaderReceived { dir: Dir, header: u16 },
 }
 
-pub(crate) fn insert_stream_header_buffers(
+fn insert_stream_header_buffers(
     mut commands: Commands,
     connection_q: Query<(Entity, &ConnectionOf), Added<ConnectionOf>>,
     headerd_endpoint_q: Query<(), With<EndpointWithHeaderedConnections>>,
@@ -117,7 +126,7 @@ pub(crate) fn insert_stream_header_buffers(
     }
 }
 
-pub(crate) fn read_stream_headers(
+fn read_stream_headers(
     mut connection_q: Query<(
         Entity,
         &ConnectionOf,
@@ -198,6 +207,7 @@ pub(crate) fn read_stream_headers(
 }
 
 impl RecvStreamHeaders {
+    /// Takes a stream with a particular header and gives responsibility of it to the caller.
     pub fn take_stream(&mut self, header: impl Into<u16>) -> Option<(StreamId, Dir)> {
         let target_header = header.into();
 
@@ -220,13 +230,14 @@ impl RecvStreamHeaders {
     }
 }
 
-/// Used for writing a header to a stream before writing data.
+/// A state machine used for writing a header and then stream data.
 pub struct HeaderedStreamState {
     stream_id: StreamId,
     header_buffer: Option<Vec<u8>>,
 }
 
 impl HeaderedStreamState {
+    /// Takes a stream opened by the caller and queues a stream header to be sent.
     pub fn new(stream_id: StreamId, header: impl Into<u16>) -> Self {
         Self {
             stream_id,

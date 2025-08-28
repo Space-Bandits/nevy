@@ -5,14 +5,14 @@ fn main() {
     let mut app = App::new();
 
     app.add_plugins(MinimalPlugins);
-    app.add_plugins(bevy::log::LogPlugin {
-        level: bevy::log::tracing::Level::DEBUG,
-        ..default()
-    });
+    app.add_plugins(bevy::log::LogPlugin::default());
     app.add_plugins(NevyPlugin::default());
 
     app.add_systems(Startup, setup);
-    app.add_systems(Update, (insert_streams, receive_messages));
+    app.add_systems(
+        Update,
+        (insert_streams, receive_messages, remove_closed_connections),
+    );
 
     app.run();
 }
@@ -56,9 +56,7 @@ fn receive_messages(
         }
 
         while let Some(event) = connection.poll_stream_event() {
-            match dbg!(event) {
-                _ => (),
-            }
+            info!("Stream event: {:?}", event);
         }
 
         streams
@@ -66,7 +64,11 @@ fn receive_messages(
             .retain_mut(|&mut (stream_id, ref mut buffer)| loop {
                 match connection.read_recv_stream(stream_id, usize::MAX, true) {
                     Ok(Some(Chunk { data, .. })) => buffer.extend(data),
-                    Ok(None) => break false,
+                    Ok(None) => {
+                        info!("Message: {:?}", String::from_utf8(std::mem::take(buffer)));
+
+                        break false;
+                    }
                     Err(StreamReadError::Blocked) => break true,
                     Err(err) => {
                         error!("stream encountered error: {}", err);
@@ -79,6 +81,19 @@ fn receive_messages(
     }
 
     Ok(())
+}
+
+fn remove_closed_connections(
+    mut commands: Commands,
+    connection_q: Query<(Entity, &ConnectionStatus), Changed<ConnectionStatus>>,
+) {
+    for (connection_entity, status) in &connection_q {
+        let (ConnectionStatus::Closed { .. } | ConnectionStatus::Failed { .. }) = status else {
+            continue;
+        };
+
+        commands.entity(connection_entity).despawn();
+    }
 }
 
 fn create_server_endpoint_config() -> nevy::quinn_proto::ServerConfig {

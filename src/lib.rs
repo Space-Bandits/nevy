@@ -1,11 +1,7 @@
+#![doc = include_str!("../readme.md")]
+
 use bevy::{
-    ecs::{
-        component::{ComponentHook, HookContext, StorageType},
-        intern::Interned,
-        relationship::Relationship,
-        schedule::ScheduleLabel,
-        world::DeferredWorld,
-    },
+    ecs::{intern::Interned, schedule::ScheduleLabel},
     prelude::*,
 };
 
@@ -39,8 +35,8 @@ pub use headers::{
 #[cfg(feature = "messages")]
 pub use messages::{
     senders::{AddSharedSender, LocalMessageSender, MessageSendStreamState, SharedMessageSender},
-    AddMessage, EndpointWithMessageConnections, MessageId, MessageRecvStreams, MessageStreamHeader,
-    NevyMessagesPlugin, ReceivedMessages, UpdateMessageSet,
+    AddMessage, EndpointWithMessageConnections, MessageId, MessageRecvStreams, NevyMessagesPlugin,
+    ReceivedMessages, UpdateMessageSet,
 };
 
 /// The schedule that nevy performs updates in by default
@@ -85,6 +81,8 @@ impl Plugin for NevyPlugin {
 }
 
 /// Relationship target for all [ConnectionOf]s for a [QuicEndpoint]
+///
+/// Use this component to get all the current connections on an endpoint.
 #[derive(Component, Default)]
 #[relationship_target(relationship = ConnectionOf)]
 pub struct EndpointOf(Vec<Entity>);
@@ -106,61 +104,25 @@ impl<'a> IntoIterator for &'a EndpointOf {
 
 /// This component represents a connection on a [QuicEndpoint].
 ///
+/// This component will be inserted on a new entity when a connection is accepted.
+///
 /// Insert this component along with a [QuicConnectionConfig] to open a connection.
-#[derive(Deref)]
+///
+/// This component will not be removed when the connection is closed.
+/// This is because there may still be data to be read from the connection.
+/// You should add logic to either despawn connections that you are finished with
+/// or reinsert this component to reopen the connection.
+///
+/// Removing this component or despawning the entity whilst a connection is open will
+/// ungracefully drop the connection and the endpoint will stop responding to the peer.
+#[derive(Component, Deref)]
+#[component(immutable)]
+#[relationship(relationship_target = EndpointOf)]
 pub struct ConnectionOf(pub Entity);
 
-impl Component for ConnectionOf {
-    const STORAGE_TYPE: StorageType = StorageType::Table;
-
-    type Mutability = bevy::ecs::component::Immutable;
-
-    fn on_insert() -> Option<ComponentHook> {
-        Some(|mut world: DeferredWorld, hook_context: HookContext| {
-            <Self as Relationship>::on_insert(world.reborrow(), hook_context);
-
-            let target_entity = world.entity(hook_context.entity).get::<Self>().unwrap().0;
-
-            world.trigger_targets(NewConnectionOf(hook_context.entity), target_entity);
-        })
-    }
-
-    fn on_replace() -> Option<ComponentHook> {
-        Some(<Self as Relationship>::on_replace)
-    }
-
-    fn on_remove() -> Option<ComponentHook> {
-        Some(|mut world: DeferredWorld, hook_context: HookContext| {
-            let target_entity = world.entity(hook_context.entity).get::<Self>().unwrap().0;
-
-            world.trigger_targets(RemovedConnectionOf(hook_context.entity), target_entity);
-        })
-    }
-}
-
-impl Relationship for ConnectionOf {
-    type RelationshipTarget = EndpointOf;
-
-    fn get(&self) -> Entity {
-        self.0
-    }
-
-    fn from(entity: Entity) -> Self {
-        ConnectionOf(entity)
-    }
-}
-
-/// Observer event that is triggered when a new [ConnectionOf] component is inserted.
-/// The target entity is the associated endpoint.
-#[derive(Event)]
-pub struct NewConnectionOf(pub Entity);
-
-/// Observer event that is triggered when a [ConnectionOf] component is removed.
-/// The target entity is the associated endpoint.
-#[derive(Event)]
-pub struct RemovedConnectionOf(pub Entity);
-
 /// This type implements [IncomingConnectionHandler] and will always accept incoming connections.
+///
+/// [Self::new] will create a `Box<dyn IncomingConnectionHandler>`.
 pub struct AlwaysAcceptIncoming;
 
 impl IncomingConnectionHandler for AlwaysAcceptIncoming {
@@ -176,6 +138,8 @@ impl AlwaysAcceptIncoming {
 }
 
 /// This type implements [IncomingConnectionHandler] and will always reject incoming connections.
+///
+/// [Self::new] will create a `Box<dyn IncomingConnectionHandler>`.
 pub struct AlwaysRejectIncoming;
 
 impl IncomingConnectionHandler for AlwaysRejectIncoming {

@@ -13,9 +13,7 @@ use quinn_proto::{ClientConfig, ConnectionHandle, DatagramEvent, Incoming};
 use quinn_udp::{UdpSockRef, UdpSocketState};
 use thiserror::Error;
 
-use crate::{
-    connection::ConnectionState, ConnectionOf, EndpointOf, NewConnectionOf, RemovedConnectionOf,
-};
+use crate::{connection::ConnectionState, ConnectionOf, EndpointOf};
 
 /// Must be inserted onto a connection entity to open a connection.
 ///
@@ -89,18 +87,21 @@ pub enum ConnectionStatus {
 }
 
 pub(crate) fn inserted_connection_of_observer(
-    trigger: Trigger<NewConnectionOf>,
+    trigger: Trigger<OnInsert, ConnectionOf>,
     mut commands: Commands,
     mut endpoint_q: Query<&mut QuicEndpoint>,
-    connection_q: Query<(Option<&QuicConnectionConfig>, Has<QuicConnection>)>,
+    connection_q: Query<(
+        &ConnectionOf,
+        Option<&QuicConnectionConfig>,
+        Has<QuicConnection>,
+    )>,
 ) -> Result {
-    let endpoint_entity = trigger.target();
-    let connection_entity = trigger.event().0;
+    let connection_entity = trigger.target();
+
+    let (connection_of, config, opened_by_endpoint) = connection_q.get(connection_entity)?;
 
     // confirm that the endpoint has the right components
-    let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
-
-    let (config, opened_by_endpoint) = connection_q.get(connection_entity)?;
+    let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
     if !opened_by_endpoint {
         // this connection was inserted by the application. Open a connection
@@ -154,12 +155,14 @@ pub(crate) fn inserted_connection_of_observer(
 }
 
 pub(crate) fn removed_connection_of_observer(
-    trigger: Trigger<RemovedConnectionOf>,
+    trigger: Trigger<OnReplace, ConnectionOf>,
     mut commands: Commands,
+    connection_q: Query<&ConnectionOf>,
     mut endpoint_q: Query<&mut QuicEndpoint>,
 ) -> Result {
-    let endpoint_entity = trigger.target();
-    let connection_entity = trigger.event().0;
+    let connection_entity = trigger.target();
+
+    let connection_of = connection_q.get(connection_entity)?;
 
     // remove associated components
     commands
@@ -168,7 +171,7 @@ pub(crate) fn removed_connection_of_observer(
 
     // ungracefully drop the connection state
 
-    let Ok(mut endpoint) = endpoint_q.get_mut(endpoint_entity) else {
+    let Ok(mut endpoint) = endpoint_q.get_mut(**connection_of) else {
         return Ok(());
     };
 
@@ -185,11 +188,6 @@ pub(crate) fn removed_connection_of_observer(
             })
     {
         if !already_drained {
-            warn!(
-                "Connection {} on endpoint {} was ungracefully dropped",
-                connection_entity, endpoint_entity
-            );
-
             endpoint
                 .endpoint
                 .handle_event(connection_handle, quinn_proto::EndpointEvent::drained());
@@ -219,6 +217,13 @@ pub(crate) fn update_endpoints(
 }
 
 impl QuicEndpoint {
+    /// The method to construct an endpoint.
+    ///
+    /// This constructor takes
+    /// - A bind address for the UDP socket.
+    /// - A [quin_proto] endpoint config
+    /// - A [quin_proto] server config. If this is `None` then the endpoint won't be able to accept incoming connections.
+    /// - An [IncomingConnectionHandler] responsible for deciding whether to accept connections.
     pub fn new(
         bind_addr: impl ToSocketAddrs,
         endpoint_config: quinn_proto::EndpointConfig,
@@ -250,8 +255,12 @@ impl QuicEndpoint {
         })
     }
 
-    pub fn set_incoming_handler(&mut self, incoming_handler: Box<dyn IncomingConnectionHandler>) {
-        self.incoming_handler = incoming_handler.into();
+    /// Replaces the current [IncomingConnectionHandler] and returns it.
+    pub fn set_incoming_handler(
+        &mut self,
+        incoming_handler: Box<dyn IncomingConnectionHandler>,
+    ) -> Box<dyn IncomingConnectionHandler> {
+        std::mem::replace(&mut self.incoming_handler, incoming_handler)
     }
 
     /// Gets the connection state for a [QuicConnection] associated with this endpoint.
@@ -261,10 +270,6 @@ impl QuicEndpoint {
     ) -> Result<&mut ConnectionState, NoConnectionState> {
         self.connections
             .get_mut(&connection.connection_handle)
-            // .map(|connection| ConnectionMut {
-            //     connection,
-            //     endpoint: &mut self.endpoint,
-            // })
             .ok_or(NoConnectionState)
     }
 

@@ -31,6 +31,11 @@ impl ConnectionState {
         self.stream_events.pop_front()
     }
 
+    /// Returns `true` once there is no longer any need to keep this connection entity around.
+    pub fn is_drained(&mut self) -> bool {
+        self.connection.is_drained()
+    }
+
     /// Accepts a new stream of a certain direction if one is available.
     pub fn accept_stream(&mut self, direction: Dir) -> Option<StreamId> {
         self.connection

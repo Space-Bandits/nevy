@@ -13,6 +13,8 @@ use crate::{
 };
 
 /// State machine for a stream that sends messages.
+///
+/// This can be used directly, but it is easier to use either [LocalMessageSender] or [SharedMessageSender]
 pub struct MessageSendStreamState {
     stream: HeaderedStreamState,
     buffer: VecDeque<u8>,
@@ -21,10 +23,9 @@ pub struct MessageSendStreamState {
 impl MessageSendStreamState {
     /// Creates a new state machine that will send data on a stream.
     ///
-    /// The provided stream header should be the unique id that the peer is expecting.
-    /// See [MessageStreamHeader].
+    /// The provided stream header should be the unique id that the peer is expecting for messages.
     ///
-    /// Message streams should be unidirectional.
+    /// Message streams should be unidirectional, if they aren't it is your responsibility to handle the receiving direction.
     pub fn new(stream_id: StreamId, header: impl Into<u16>) -> Self {
         Self {
             stream: HeaderedStreamState::new(stream_id, header.into()),
@@ -45,6 +46,8 @@ impl MessageSendStreamState {
     }
 
     /// Writes as much of the internal buffer as possible to the connection.
+    ///
+    /// This should be called frequently even if messages aren't being written to make sure that all data is sent.
     pub fn flush(&mut self, connection: &mut ConnectionState) -> Result<(), StreamWriteError> {
         if self.buffer.len() == 0 {
             return Ok(());
@@ -103,7 +106,7 @@ impl MessageSendStreamState {
     }
 }
 
-/// Ecs parameters needed by a shared or local message sender
+/// System parameters needed by a shared or local message sender
 #[derive(SystemParam)]
 struct SenderParams<'w, 's> {
     connection_q: Query<'w, 's, (&'static QuicConnection, &'static ConnectionOf)>,
@@ -118,14 +121,17 @@ struct SenderState {
 
 /// System parameter that holds a [Local] [MessageSendStreamState] for each connection.
 ///
-/// Should be used when the ordering of messages sent in different systems isn't important
+/// Should be used when the ordering of messages sent in different systems isn't important.
+///
+/// This sender needs to be flushed manually.
+/// This is best done by putting a [Self::flush] at the beginning of every system using this parameter.
 #[derive(SystemParam)]
 pub struct LocalMessageSender<'w, 's> {
     params: SenderParams<'w, 's>,
     state: Local<'s, SenderState>,
 }
 
-/// The shared state for a [SharedMessageSender]
+/// The shared state for a [SharedMessageSender].
 #[derive(Resource)]
 struct SharedMessageSenderState<S> {
     _p: PhantomData<S>,
@@ -134,7 +140,11 @@ struct SharedMessageSenderState<S> {
 
 /// System parameter that accesses a shared [MessageSendStreamState] for each connection.
 ///
-/// Should be used when the ordering of messages sent in different systems is important
+/// Should be used when the ordering of messages sent in different systems is important.
+///
+/// Each shared sender is accessed with a marker type `S` and needs to be added to the app using [AddSharedSender::add_shared_sender].
+///
+/// This sender is flushed automatically.
 #[derive(SystemParam)]
 pub struct SharedMessageSender<'w, 's, S>
 where
@@ -264,7 +274,7 @@ impl<'w, 's> LocalMessageSender<'w, 's> {
         self.state.flush(&mut self.params)
     }
 
-    /// Attempts a message on a connection.
+    /// Attempts to send a message on a connection.
     /// Returns `true` if the message was sent and `false` if it was blocked by congestion.
     /// Passing `true` into `queue` will bypass this and always queue the message the message to be sent
     /// once unblocked.
@@ -303,12 +313,14 @@ impl<'w, 's> LocalMessageSender<'w, 's> {
     }
 
     /// Finishes any message streams that are not blocked on congestion.
+    ///
+    /// This is intended to be used by systems that send messages infrequently by
+    /// running this after [Self::flush] at the beggining of the system to finish unused streams.
     pub fn finish_all_if_uncongested(&mut self) -> Result {
         self.state.finish_all_if_uncongested(&mut self.params)
     }
 
-    /// Removes the state machine for a connection if it exists,
-    /// giving responsibility of the stream to the caller.
+    /// Removes the state machine for a connection if it exists, giving responsibility of the stream to the caller.
     pub fn take_state(&mut self, connection_entity: Entity) -> Option<MessageSendStreamState> {
         self.state.take_state(connection_entity)
     }
@@ -318,7 +330,7 @@ impl<'w, 's, S> SharedMessageSender<'w, 's, S>
 where
     S: Send + Sync + 'static,
 {
-    /// Attempts a message on a connection.
+    /// Attempts to send a message on a connection.
     /// Returns `true` if the message was sent and `false` if it was blocked by congestion.
     /// Passing `true` into `queue` will bypass this and always queue the message the message to be sent
     /// once unblocked.
@@ -358,12 +370,14 @@ where
     }
 
     /// Finishes any message streams that are not blocked on congestion.
+    ///
+    /// This is intended to be used by systems that send messages infrequently by
+    /// running this every update to finish unused streams.
     pub fn finish_all_if_uncongested(&mut self) -> Result {
         self.state.state.finish_all_if_uncongested(&mut self.params)
     }
 
-    /// Removes the state machine for a connection if it exists,
-    /// giving responsibility of the stream to the caller.
+    /// Removes the state machine for a connection if it exists, giving responsibility of the stream to the caller.
     pub fn take_state(&mut self, connection_entity: Entity) -> Option<MessageSendStreamState> {
         self.state.state.take_state(connection_entity)
     }

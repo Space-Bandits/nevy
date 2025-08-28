@@ -7,14 +7,11 @@ fn main() {
     let mut app = App::new();
 
     app.add_plugins(MinimalPlugins);
-    app.add_plugins(bevy::log::LogPlugin {
-        level: bevy::log::tracing::Level::DEBUG,
-        ..default()
-    });
+    app.add_plugins(bevy::log::LogPlugin::default());
     app.add_plugins(NevyPlugin::default());
 
     app.add_systems(Startup, setup);
-    app.add_systems(Update, (send_message, close_connection).chain());
+    app.add_systems(Update, (send_message, close_connection, close_app).chain());
 
     app.run();
 }
@@ -33,7 +30,9 @@ fn setup(mut commands: Commands) {
         .id();
 
     commands.spawn((
+        // Inserting this component will open the connection.
         ConnectionOf(endpoint_entity),
+        // Opening a connection will fail if this component does not exist on the same entity.
         QuicConnectionConfig {
             client_config: create_connection_config(),
             address: "127.0.0.1:27518".parse().unwrap(),
@@ -97,6 +96,19 @@ fn close_connection(
     }
 
     Ok(())
+}
+
+fn close_app(
+    connection_q: Query<&ConnectionStatus, Changed<ConnectionStatus>>,
+    mut app_exit_w: EventWriter<AppExit>,
+) {
+    for status in &connection_q {
+        let (ConnectionStatus::Closed { .. } | ConnectionStatus::Failed { .. }) = status else {
+            continue;
+        };
+
+        app_exit_w.write_default();
+    }
 }
 
 /// creates the quinn client config for a connection with a server
