@@ -1,9 +1,9 @@
 [package]
 name = "nevy"
-version = "0.1.0-dev"
+version = "0.1.0"
 edition = "2021"
 categories = ["network-programming", "game-development"]
-description = "Simple, expressive networking for your bevy games"
+description = "QUIC implementation with quinn for the bevy game engine"
 keywords = ["netcode", "networking", "bevy"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -16,7 +16,7 @@ headers = []
 messages = ["headers", "dep:serde", "dep:bincode"]
 
 [dependencies]
-bevy = { version = "0.16.1", default-features = false }
+bevy = { version = "0.16", default-features = false }
 log = "0.4.27"
 quinn-proto = { version = "0.11", features = ["rustls"] }
 quinn-udp = "0.5"
@@ -29,4 +29,4 @@ bincode = { version = "2.0", features = ["serde"], optional = true }
 [dev-dependencies]
 rustls = { version = "0.23.5", default-features = false, features = ["std"] }
 rcgen = "0.13.1"
-bevy = { version = "0.16.1" }
+bevy = { version = "0.16" }

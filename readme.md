@@ -91,3 +91,9 @@ This is so that you can still retrieve the connection state from it's endpoint t
 Make sure to despawn any closed connections once you are done with them.
 
 The entity can be reused for another connection once it's `ConnectionOf` component is removed or replaced.
+
+## Bevy versions
+
+| Bevy | Nevy |
+| -----| ---- |
+| 0.16 | 0.1  |
