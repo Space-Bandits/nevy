@@ -34,9 +34,12 @@ pub use headers::{
 
 #[cfg(feature = "messages")]
 pub use messages::{
-    senders::{AddSharedSender, LocalMessageSender, MessageSendStreamState, SharedMessageSender},
-    AddMessage, EndpointWithMessageConnections, MessageId, MessageRecvStreams, NevyMessagesPlugin,
-    ReceivedMessages, UpdateMessageSet,
+    AddNetMessage, EndpointWithNetMessageConnections, NetMessageId, NetMessageReceiveHeader,
+    NetMessageReceiveStreams, NevyNetMessagesPlugin, ReceivedNetMessages, UpdateNetMessageSet,
+    senders::{
+        AddSharedSender, LocalNetMessageSender, NetMessageSendHeader, NetMessageSendStreamState,
+        NetMessageSender, SharedNetMessageSender,
+    },
 };
 
 /// The schedule that nevy performs updates in by default

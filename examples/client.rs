@@ -100,7 +100,7 @@ fn close_connection(
 
 fn close_app(
     connection_q: Query<&ConnectionStatus, Changed<ConnectionStatus>>,
-    mut app_exit_w: EventWriter<AppExit>,
+    mut app_exit_w: MessageWriter<AppExit>,
 ) {
     for status in &connection_q {
         let (ConnectionStatus::Closed { .. } | ConnectionStatus::Failed { .. }) = status else {
