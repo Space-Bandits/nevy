@@ -48,7 +48,7 @@ impl<'a> ConnectionMut<'a> {
 
     /// Transmits any outstanding packets.
     ///
-    /// This method is called whenever a [`ConnectionMut`] is dropped and during the [`UpdateEndpoints`](crate::UpdateEndpoints) system set.
+    /// This method is called whenever a [`ConnectionMut`] is dropped and during the [`UpdateEndpointSystems`](crate::UpdateEndpointSystems) system set.
     pub(crate) fn transmit_packets(&mut self) {
         while let Some(transmit) = {
             self.send_buffer.clear();

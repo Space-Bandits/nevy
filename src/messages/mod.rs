@@ -15,7 +15,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     ConnectionOf, QuicConnection, QuicEndpoint, RecvStreamHeaders, StreamId, StreamReadError,
-    UpdateEndpoints, UpdateHeaders, headers::U16Reader,
+    UpdateEndpointSystems, UpdateHeaderSystems, headers::U16Reader,
 };
 use senders::NetMessageSendHeader;
 
@@ -27,9 +27,9 @@ pub(crate) fn bincode_config() -> bincode::config::Configuration {
 
 /// System sets messages are processed.
 ///
-/// Happens after [UpdateHeaders](crate::headers::UpdateHeaders)
+/// Happens after [UpdateHeaderSystems](crate::headers::UpdateHeaderSystems)
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub enum UpdateNetMessageSet {
+pub enum UpdateNetMessageSystems {
     InsertComponents,
     ReadNetMessages,
     DeserializeNetMessages,
@@ -68,12 +68,12 @@ impl Plugin for NevyNetMessagesPlugin {
         app.configure_sets(
             self.schedule,
             (
-                UpdateNetMessageSet::InsertComponents,
-                UpdateNetMessageSet::ReadNetMessages.after(UpdateHeaders),
-                UpdateNetMessageSet::DeserializeNetMessages,
+                UpdateNetMessageSystems::InsertComponents,
+                UpdateNetMessageSystems::ReadNetMessages.after(UpdateHeaderSystems),
+                UpdateNetMessageSystems::DeserializeNetMessages,
             )
                 .chain()
-                .after(UpdateEndpoints),
+                .after(UpdateEndpointSystems),
         );
 
         app.insert_resource(NetMessageReceiveHeader(self.message_header));
@@ -82,10 +82,10 @@ impl Plugin for NevyNetMessagesPlugin {
         app.add_systems(
             self.schedule,
             (
-                insert_recv_stream_buffers.in_set(UpdateNetMessageSet::InsertComponents),
+                insert_recv_stream_buffers.in_set(UpdateNetMessageSystems::InsertComponents),
                 (take_message_streams, read_message_streams)
                     .chain()
-                    .in_set(UpdateNetMessageSet::ReadNetMessages),
+                    .in_set(UpdateNetMessageSystems::ReadNetMessages),
             ),
         );
     }
@@ -126,7 +126,7 @@ impl AddNetMessage for App {
 
         self.add_systems(
             PostUpdate,
-            deserialize_messages::<T>.in_set(UpdateNetMessageSet::DeserializeNetMessages),
+            deserialize_messages::<T>.in_set(UpdateNetMessageSystems::DeserializeNetMessages),
         );
     }
 }
@@ -213,13 +213,13 @@ fn insert_recv_stream_buffers(
 }
 
 fn insert_received_message_buffers<T>(
-    event: On<Insert, NetMessageReceiveStreams>,
+    insert: On<Insert, NetMessageReceiveStreams>,
     mut commands: Commands,
 ) where
     ReceivedNetMessages<T>: Component,
 {
     commands
-        .entity(event.entity)
+        .entity(insert.entity)
         .insert(ReceivedNetMessages::<T> {
             messages: VecDeque::new(),
         });

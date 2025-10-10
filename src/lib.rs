@@ -29,13 +29,13 @@ pub use endpoint::{
 #[cfg(feature = "headers")]
 pub use headers::{
     EndpointWithHeaderedConnections, HeaderedStreamState, NevyHeaderPlugin, RecvStreamHeaders,
-    UpdateHeaders,
+    UpdateHeaderSystems,
 };
 
 #[cfg(feature = "messages")]
 pub use messages::{
     AddNetMessage, EndpointWithNetMessageConnections, NetMessageId, NetMessageReceiveHeader,
-    NetMessageReceiveStreams, NevyNetMessagesPlugin, ReceivedNetMessages, UpdateNetMessageSet,
+    NetMessageReceiveStreams, NevyNetMessagesPlugin, ReceivedNetMessages, UpdateNetMessageSystems,
     senders::{
         AddSharedSender, LocalNetMessageSender, NetMessageSendHeader, NetMessageSendStreamState,
         NetMessageSender, SharedNetMessageSender,
@@ -47,7 +47,7 @@ pub const DEFAULT_NEVY_SCHEDULE: PostUpdate = PostUpdate;
 
 /// System set where quic endpoints are updated and packets are sent and received.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct UpdateEndpoints;
+pub struct UpdateEndpointSystems;
 
 /// Plugin which adds observers and update systems for quic endpoints and connections.
 ///
@@ -78,7 +78,7 @@ impl Plugin for NevyPlugin {
 
         app.add_systems(
             self.schedule,
-            endpoint::update_endpoints.in_set(UpdateEndpoints),
+            endpoint::update_endpoints.in_set(UpdateEndpointSystems),
         );
     }
 }

@@ -16,14 +16,14 @@ use log::warn;
 
 use crate::{
     ConnectionMut, ConnectionOf, Dir, QuicConnection, QuicEndpoint, StreamId, StreamReadError,
-    StreamWriteError, UpdateEndpoints,
+    StreamWriteError, UpdateEndpointSystems,
 };
 
 /// System set where streams are accepted and headers are processed.
 ///
 /// Happens after [UpdateEndpoints](crate::UpdateEndpoints)
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct UpdateHeaders;
+pub struct UpdateHeaderSystems;
 
 /// Adds stream header logic to an app.
 ///
@@ -49,13 +49,16 @@ impl Default for NevyHeaderPlugin {
 
 impl Plugin for NevyHeaderPlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(self.schedule, UpdateHeaders.after(UpdateEndpoints));
+        app.configure_sets(
+            self.schedule,
+            UpdateHeaderSystems.after(UpdateEndpointSystems),
+        );
 
         app.add_systems(
             self.schedule,
             (insert_stream_header_buffers, read_stream_headers)
                 .chain()
-                .in_set(UpdateHeaders),
+                .in_set(UpdateHeaderSystems),
         );
     }
 }

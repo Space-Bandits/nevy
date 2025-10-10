@@ -87,7 +87,7 @@ pub enum ConnectionStatus {
 }
 
 pub(crate) fn inserted_connection_of_observer(
-    event: On<Insert, ConnectionOf>,
+    insert: On<Insert, ConnectionOf>,
     mut commands: Commands,
     mut endpoint_q: Query<&mut QuicEndpoint>,
     connection_q: Query<(
@@ -96,7 +96,7 @@ pub(crate) fn inserted_connection_of_observer(
         Has<QuicConnection>,
     )>,
 ) -> Result {
-    let connection_entity = event.entity;
+    let connection_entity = insert.entity;
 
     let (connection_of, config, opened_by_endpoint) = connection_q.get(connection_entity)?;
 
@@ -155,12 +155,12 @@ pub(crate) fn inserted_connection_of_observer(
 }
 
 pub(crate) fn removed_connection_of_observer(
-    event: On<Replace, ConnectionOf>,
+    replace: On<Replace, ConnectionOf>,
     mut commands: Commands,
     connection_q: Query<&ConnectionOf>,
     mut endpoint_q: Query<&mut QuicEndpoint>,
 ) -> Result {
-    let connection_entity = event.entity;
+    let connection_entity = replace.entity;
 
     let connection_of = connection_q.get(connection_entity)?;
 

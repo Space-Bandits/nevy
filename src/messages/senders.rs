@@ -12,7 +12,7 @@ use crate::{
     connection::StreamWriteError,
     headers::HeaderedStreamState,
     messages::{
-        ConnectionOf, NetMessageId, QuicConnection, QuicEndpoint, StreamId, UpdateEndpoints,
+        ConnectionOf, NetMessageId, QuicConnection, QuicEndpoint, StreamId, UpdateEndpointSystems,
         bincode_config,
     },
 };
@@ -174,7 +174,7 @@ where
 pub trait AddSharedSender {
     /// Adds a [SharedNetMessageSender] to the app that will flush in a certain schedule.
     ///
-    /// If added to the same schedule that [NevyPlugin](crate::NevyPlugin) runs in it will flush before [UpdateEndpoints].
+    /// If added to the same schedule that [NevyPlugin](crate::NevyPlugin) runs in it will flush before [UpdateEndpointSystems](crate::UpdateEndpointSystems).
     fn add_shared_sender_with_schedule<S>(&mut self, nevy_schedule: impl ScheduleLabel)
     where
         S: Send + Sync + 'static;
@@ -200,7 +200,7 @@ impl AddSharedSender for App {
 
         self.add_systems(
             nevy_schedule,
-            flush_shared_sender::<S>.before(UpdateEndpoints),
+            flush_shared_sender::<S>.before(UpdateEndpointSystems),
         );
     }
 }
