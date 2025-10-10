@@ -1,8 +1,14 @@
-use std::{collections::VecDeque, net::SocketAddr};
+use std::{
+    collections::VecDeque,
+    net::{SocketAddr, UdpSocket},
+};
 
 use bevy::prelude::*;
 use quinn_proto::{Dir, VarInt};
+use quinn_udp::UdpSocketState;
 use thiserror::Error;
+
+use crate::udp_transmit;
 
 /// The state for a connection accessed through a [QuicEndpoint](crate::endpoint::QuicEndpoint)
 /// using a [QuicConnection](crate::connection::QuicConnection) component.
@@ -10,13 +16,63 @@ pub struct ConnectionState {
     pub(crate) connection_entity: Entity,
     pub(crate) connection: quinn_proto::Connection,
     pub(crate) stream_events: VecDeque<StreamEvent>,
-    // signal to close the connection on the next update
+    /// signal to close the connection on the next update
     pub(crate) close: Option<(VarInt, Box<[u8]>)>,
 }
 
 /// Id for a stream on a particular connection
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct StreamId(quinn_proto::StreamId);
+
+#[derive(Deref, DerefMut)]
+pub struct ConnectionMut<'a> {
+    #[deref]
+    pub connection: &'a mut ConnectionState,
+    pub(crate) send_buffer: &'a mut Vec<u8>,
+    pub(crate) max_datagrams: usize,
+    pub(crate) socket: &'a UdpSocket,
+    pub(crate) socket_state: &'a UdpSocketState,
+}
+
+impl<'a> ConnectionMut<'a> {
+    /// Creates a new [`ConnectionMut`] with a smaller lifetime
+    pub fn reborrow<'b>(&'b mut self) -> ConnectionMut<'b> {
+        ConnectionMut {
+            connection: self.connection,
+            send_buffer: self.send_buffer,
+            max_datagrams: self.max_datagrams,
+            socket: self.socket,
+            socket_state: self.socket_state,
+        }
+    }
+
+    /// Transmits any outstanding packets.
+    ///
+    /// This method is called whenever a [`ConnectionMut`] is dropped and during the [`UpdateEndpointSystems`](crate::UpdateEndpointSystems) system set.
+    pub(crate) fn transmit_packets(&mut self) {
+        while let Some(transmit) = {
+            self.send_buffer.clear();
+
+            self.connection.connection.poll_transmit(
+                std::time::Instant::now(),
+                self.max_datagrams,
+                &mut self.send_buffer,
+            )
+        } {
+            // the transmit failing is equivelant to dropping due to congestion, ignore error
+            let _ = self.socket_state.send(
+                quinn_udp::UdpSockRef::from(&self.socket),
+                &udp_transmit(&transmit, &self.send_buffer),
+            );
+        }
+    }
+}
+
+impl<'a> Drop for ConnectionMut<'a> {
+    fn drop(&mut self) {
+        self.transmit_packets();
+    }
+}
 
 impl ConnectionState {
     /// gets the remote address of the connection
@@ -144,10 +200,10 @@ impl ConnectionState {
         let mut chunks = match stream.read(ordered) {
             Ok(chunks) => chunks,
             Err(quinn_proto::ReadableError::ClosedStream) => {
-                return Err(StreamReadError::ClosedStream(ClosedStreamError))
+                return Err(StreamReadError::ClosedStream(ClosedStreamError));
             }
             Err(quinn_proto::ReadableError::IllegalOrderedRead) => {
-                return Err(StreamReadError::IllegalOrderedRead)
+                return Err(StreamReadError::IllegalOrderedRead);
             }
         };
 

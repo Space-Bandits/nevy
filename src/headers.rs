@@ -15,15 +15,15 @@ use bevy::{
 use log::warn;
 
 use crate::{
-    ConnectionOf, ConnectionState, Dir, QuicConnection, QuicEndpoint, StreamId, StreamReadError,
-    StreamWriteError, UpdateEndpoints,
+    ConnectionMut, ConnectionOf, Dir, QuicConnection, QuicEndpoint, StreamId, StreamReadError,
+    StreamWriteError, UpdateEndpointSystems,
 };
 
 /// System set where streams are accepted and headers are processed.
 ///
 /// Happens after [UpdateEndpoints](crate::UpdateEndpoints)
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct UpdateHeaders;
+pub struct UpdateHeaderSystems;
 
 /// Adds stream header logic to an app.
 ///
@@ -49,13 +49,16 @@ impl Default for NevyHeaderPlugin {
 
 impl Plugin for NevyHeaderPlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(self.schedule, UpdateHeaders.after(UpdateEndpoints));
+        app.configure_sets(
+            self.schedule,
+            UpdateHeaderSystems.after(UpdateEndpointSystems),
+        );
 
         app.add_systems(
             self.schedule,
             (insert_stream_header_buffers, read_stream_headers)
                 .chain()
-                .in_set(UpdateHeaders),
+                .in_set(UpdateHeaderSystems),
         );
     }
 }
@@ -138,7 +141,7 @@ fn read_stream_headers(
     for (connection_entity, connection_of, quic_connection, mut buffers) in &mut connection_q {
         let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
-        let connection = endpoint.get_connection(quic_connection)?;
+        let mut connection = endpoint.get_connection(quic_connection)?;
 
         for dir in [Dir::Uni, Dir::Bi] {
             while let Some(stream_id) = connection.accept_stream(dir) {
@@ -255,7 +258,7 @@ impl HeaderedStreamState {
     /// Will only write data once the header has been written.
     pub fn write(
         &mut self,
-        connection: &mut ConnectionState,
+        mut connection: ConnectionMut,
         data: &[u8],
     ) -> Result<usize, StreamWriteError> {
         if let Some(buffer) = &mut self.header_buffer {

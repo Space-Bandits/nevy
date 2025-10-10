@@ -17,7 +17,7 @@ pub(crate) mod messages;
 pub use quinn_proto::{self, Dir};
 
 pub use connection::{
-    Chunk, ConnectionState, ResetStreamError, StopStreamError, StreamEvent, StreamFinishError,
+    Chunk, ConnectionMut, ResetStreamError, StopStreamError, StreamEvent, StreamFinishError,
     StreamId, StreamReadError, StreamWriteError, StreamsExhausted, VarIntBoundsExceeded,
 };
 
@@ -29,14 +29,17 @@ pub use endpoint::{
 #[cfg(feature = "headers")]
 pub use headers::{
     EndpointWithHeaderedConnections, HeaderedStreamState, NevyHeaderPlugin, RecvStreamHeaders,
-    UpdateHeaders,
+    UpdateHeaderSystems,
 };
 
 #[cfg(feature = "messages")]
 pub use messages::{
-    senders::{AddSharedSender, LocalMessageSender, MessageSendStreamState, SharedMessageSender},
-    AddMessage, EndpointWithMessageConnections, MessageId, MessageRecvStreams, NevyMessagesPlugin,
-    ReceivedMessages, UpdateMessageSet,
+    AddNetMessage, EndpointWithNetMessageConnections, NetMessageId, NetMessageReceiveHeader,
+    NetMessageReceiveStreams, NevyNetMessagesPlugin, ReceivedNetMessages, UpdateNetMessageSystems,
+    senders::{
+        AddSharedSender, LocalNetMessageSender, NetMessageSendHeader, NetMessageSendStreamState,
+        NetMessageSender, SharedNetMessageSender,
+    },
 };
 
 /// The schedule that nevy performs updates in by default
@@ -44,7 +47,7 @@ pub const DEFAULT_NEVY_SCHEDULE: PostUpdate = PostUpdate;
 
 /// System set where quic endpoints are updated and packets are sent and received.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct UpdateEndpoints;
+pub struct UpdateEndpointSystems;
 
 /// Plugin which adds observers and update systems for quic endpoints and connections.
 ///
@@ -75,7 +78,7 @@ impl Plugin for NevyPlugin {
 
         app.add_systems(
             self.schedule,
-            endpoint::update_endpoints.in_set(UpdateEndpoints),
+            endpoint::update_endpoints.in_set(UpdateEndpointSystems),
         );
     }
 }
@@ -151,5 +154,22 @@ impl IncomingConnectionHandler for AlwaysRejectIncoming {
 impl AlwaysRejectIncoming {
     pub fn new() -> Box<dyn IncomingConnectionHandler> {
         Box::new(AlwaysRejectIncoming)
+    }
+}
+
+pub(crate) fn udp_transmit<'a>(
+    transmit: &'a quinn_proto::Transmit,
+    buffer: &'a [u8],
+) -> quinn_udp::Transmit<'a> {
+    quinn_udp::Transmit {
+        destination: transmit.destination,
+        ecn: transmit.ecn.map(|ecn| match ecn {
+            quinn_proto::EcnCodepoint::Ect0 => quinn_udp::EcnCodepoint::Ect0,
+            quinn_proto::EcnCodepoint::Ect1 => quinn_udp::EcnCodepoint::Ect1,
+            quinn_proto::EcnCodepoint::Ce => quinn_udp::EcnCodepoint::Ce,
+        }),
+        contents: &buffer[0..transmit.size],
+        segment_size: transmit.segment_size,
+        src_ip: transmit.src_ip,
     }
 }

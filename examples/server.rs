@@ -47,7 +47,7 @@ fn receive_messages(
     for (mut streams, connection_of, connection) in connection_q.iter_mut() {
         let mut endpoint = endpoint_q.get_mut(**connection_of).unwrap();
 
-        let Ok(connection) = endpoint.get_connection(connection) else {
+        let Ok(mut connection) = endpoint.get_connection(connection) else {
             continue;
         };
 
@@ -61,22 +61,24 @@ fn receive_messages(
 
         streams
             .streams
-            .retain_mut(|&mut (stream_id, ref mut buffer)| loop {
-                match connection.read_recv_stream(stream_id, usize::MAX, true) {
-                    Ok(Some(Chunk { data, .. })) => buffer.extend(data),
-                    Ok(None) => {
-                        info!("Message: {:?}", String::from_utf8(std::mem::take(buffer)));
+            .retain_mut(|&mut (stream_id, ref mut buffer)| {
+                loop {
+                    match connection.read_recv_stream(stream_id, usize::MAX, true) {
+                        Ok(Some(Chunk { data, .. })) => buffer.extend(data),
+                        Ok(None) => {
+                            info!("Message: {:?}", String::from_utf8(std::mem::take(buffer)));
 
-                        break false;
+                            break false;
+                        }
+                        Err(StreamReadError::Blocked) => break true,
+                        Err(err) => {
+                            error!("stream encountered error: {}", err);
+                            break false;
+                        }
                     }
-                    Err(StreamReadError::Blocked) => break true,
-                    Err(err) => {
-                        error!("stream encountered error: {}", err);
-                        break false;
-                    }
+
+                    break true;
                 }
-
-                break true;
             });
     }
 
