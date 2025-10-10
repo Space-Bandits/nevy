@@ -17,7 +17,7 @@ pub(crate) mod messages;
 pub use quinn_proto::{self, Dir};
 
 pub use connection::{
-    Chunk, ConnectionState, ResetStreamError, StopStreamError, StreamEvent, StreamFinishError,
+    Chunk, ConnectionMut, ResetStreamError, StopStreamError, StreamEvent, StreamFinishError,
     StreamId, StreamReadError, StreamWriteError, StreamsExhausted, VarIntBoundsExceeded,
 };
 
@@ -154,5 +154,22 @@ impl IncomingConnectionHandler for AlwaysRejectIncoming {
 impl AlwaysRejectIncoming {
     pub fn new() -> Box<dyn IncomingConnectionHandler> {
         Box::new(AlwaysRejectIncoming)
+    }
+}
+
+pub(crate) fn udp_transmit<'a>(
+    transmit: &'a quinn_proto::Transmit,
+    buffer: &'a [u8],
+) -> quinn_udp::Transmit<'a> {
+    quinn_udp::Transmit {
+        destination: transmit.destination,
+        ecn: transmit.ecn.map(|ecn| match ecn {
+            quinn_proto::EcnCodepoint::Ect0 => quinn_udp::EcnCodepoint::Ect0,
+            quinn_proto::EcnCodepoint::Ect1 => quinn_udp::EcnCodepoint::Ect1,
+            quinn_proto::EcnCodepoint::Ce => quinn_udp::EcnCodepoint::Ce,
+        }),
+        contents: &buffer[0..transmit.size],
+        segment_size: transmit.segment_size,
+        src_ip: transmit.src_ip,
     }
 }

@@ -13,7 +13,7 @@ use quinn_proto::{ClientConfig, ConnectionHandle, DatagramEvent, Incoming};
 use quinn_udp::{UdpSockRef, UdpSocketState};
 use thiserror::Error;
 
-use crate::{ConnectionOf, EndpointOf, connection::ConnectionState};
+use crate::{ConnectionMut, ConnectionOf, EndpointOf, connection::ConnectionState, udp_transmit};
 
 /// Must be inserted onto a connection entity to open a connection.
 ///
@@ -264,13 +264,20 @@ impl QuicEndpoint {
     }
 
     /// Gets the connection state for a [QuicConnection] associated with this endpoint.
-    pub fn get_connection(
-        &mut self,
+    pub fn get_connection<'a>(
+        &'a mut self,
         connection: &QuicConnection,
-    ) -> Result<&mut ConnectionState, NoConnectionState> {
+    ) -> Result<ConnectionMut<'a>, NoConnectionState> {
         self.connections
             .get_mut(&connection.connection_handle)
             .ok_or(NoConnectionState)
+            .map(|connection| ConnectionMut {
+                connection,
+                send_buffer: &mut self.send_buffer,
+                max_datagrams: self.socket_state.gro_segments(),
+                socket: &self.socket,
+                socket_state: &self.socket_state,
+            })
     }
 
     fn update(&mut self, mut context: EndpointUpdateContext) {
@@ -448,8 +455,6 @@ impl QuicEndpoint {
     }
 
     fn update_connections(&mut self, context: &mut EndpointUpdateContext) {
-        let max_gso_datagrams = self.socket_state.gro_segments();
-
         for (&connection_handle, connection) in self.connections.iter_mut() {
             if let Some((code, reason)) = connection.close.take() {
                 connection
@@ -464,22 +469,14 @@ impl QuicEndpoint {
                     });
             }
 
-            // Transmit any packets required
-            while let Some(transmit) = {
-                self.send_buffer.clear();
-
-                connection.connection.poll_transmit(
-                    std::time::Instant::now(),
-                    max_gso_datagrams,
-                    &mut self.send_buffer,
-                )
-            } {
-                // the transmit failing is equivelant to dropping due to congestion, ignore error
-                let _ = self.socket_state.send(
-                    quinn_udp::UdpSockRef::from(&self.socket),
-                    &udp_transmit(&transmit, &self.send_buffer),
-                );
+            ConnectionMut {
+                connection,
+                send_buffer: &mut self.send_buffer,
+                max_datagrams: self.socket_state.gro_segments(),
+                socket: &self.socket,
+                socket_state: &self.socket_state,
             }
+            .transmit_packets();
 
             let now = std::time::Instant::now();
             while let Some(deadline) = connection.connection.poll_timeout() {
@@ -533,21 +530,4 @@ pub struct NoConnectionState;
 /// Implement this trait to define logic for handling incoming connections.
 pub trait IncomingConnectionHandler: Send + Sync + 'static {
     fn request(&mut self, incoming: &Incoming) -> bool;
-}
-
-fn udp_transmit<'a>(
-    transmit: &'a quinn_proto::Transmit,
-    buffer: &'a [u8],
-) -> quinn_udp::Transmit<'a> {
-    quinn_udp::Transmit {
-        destination: transmit.destination,
-        ecn: transmit.ecn.map(|ecn| match ecn {
-            quinn_proto::EcnCodepoint::Ect0 => quinn_udp::EcnCodepoint::Ect0,
-            quinn_proto::EcnCodepoint::Ect1 => quinn_udp::EcnCodepoint::Ect1,
-            quinn_proto::EcnCodepoint::Ce => quinn_udp::EcnCodepoint::Ce,
-        }),
-        contents: &buffer[0..transmit.size],
-        segment_size: transmit.segment_size,
-        src_ip: transmit.src_ip,
-    }
 }

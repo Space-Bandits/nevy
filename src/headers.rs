@@ -15,7 +15,7 @@ use bevy::{
 use log::warn;
 
 use crate::{
-    ConnectionOf, ConnectionState, Dir, QuicConnection, QuicEndpoint, StreamId, StreamReadError,
+    ConnectionMut, ConnectionOf, Dir, QuicConnection, QuicEndpoint, StreamId, StreamReadError,
     StreamWriteError, UpdateEndpoints,
 };
 
@@ -138,7 +138,7 @@ fn read_stream_headers(
     for (connection_entity, connection_of, quic_connection, mut buffers) in &mut connection_q {
         let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
-        let connection = endpoint.get_connection(quic_connection)?;
+        let mut connection = endpoint.get_connection(quic_connection)?;
 
         for dir in [Dir::Uni, Dir::Bi] {
             while let Some(stream_id) = connection.accept_stream(dir) {
@@ -255,7 +255,7 @@ impl HeaderedStreamState {
     /// Will only write data once the header has been written.
     pub fn write(
         &mut self,
-        connection: &mut ConnectionState,
+        mut connection: ConnectionMut,
         data: &[u8],
     ) -> Result<usize, StreamWriteError> {
         if let Some(buffer) = &mut self.header_buffer {
