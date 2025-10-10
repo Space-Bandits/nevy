@@ -152,6 +152,7 @@ pub struct LocalNetMessageSender<'w, 's> {
 struct SharedNetMessageSenderState<S> {
     _p: PhantomData<S>,
     state: SenderState,
+    stream_priority: i32,
 }
 
 /// System parameter that accesses a shared [NetMessageSendStreamState] for each connection.
@@ -171,37 +172,308 @@ where
 }
 
 /// Trait extension for [App](crate::App) that allows adding a [SharedNetMessageSender].
+impl SenderState {
+    // fn set_priority(
+    //     &mut self,
+    //     params: &mut SenderParams,
+    //     connection_entity: Entity,
+    //     stream_priority: impl Into<i32>,
+    // ) -> Result {
+    //     let (connection, connection_of) = params.connection_q.get(connection_entity)?;
+
+    //     let mut endpoint = params.endpoint_q.get_mut(**connection_of)?;
+
+    //     let connection = endpoint.get_connection(connection)?;
+
+    //     let state = self.connections.get(&connection_entity)?;
+
+    //     connection.set_send_stream_priority(, priority)
+
+    //     Ok(())
+    // }
+
+    fn flush(&mut self, params: &mut SenderParams) -> Result {
+        let mut removed_connections = Vec::new();
+
+        for (&connection_entity, state) in self.connections.iter_mut() {
+            let Ok((connection, connection_of)) = params.connection_q.get(connection_entity) else {
+                removed_connections.push(connection_entity);
+
+                continue;
+            };
+
+            let mut endpoint = params.endpoint_q.get_mut(**connection_of)?;
+
+            let connection = endpoint.get_connection(connection)?;
+
+            state.flush(connection)?;
+        }
+
+        for connection_entity in removed_connections {
+            self.connections.remove(&connection_entity);
+        }
+
+        Ok(())
+    }
+
+    fn write<T>(
+        &mut self,
+        params: &mut SenderParams,
+        header: impl Into<u16>,
+        connection_entity: Entity,
+        message_id: MessageId<T>,
+        queue: bool,
+        message: &T,
+    ) -> Result<bool>
+    where
+        T: Serialize,
+    {
+        let (connection, connection_of) = params.connection_q.get(connection_entity)?;
+
+        let mut endpoint = params.endpoint_q.get_mut(**connection_of)?;
+
+        let connection = endpoint.get_connection(connection)?;
+
+        let state = match self.connections.entry(connection_entity) {
+            bevy::platform::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            bevy::platform::collections::hash_map::Entry::Vacant(entry) => {
+                let stream_id = connection.open_stream(Dir::Uni)?;
+
+                entry.insert(MessageSendStreamState::new(stream_id, header))
+            }
+        };
+
+        Ok(state.write(message_id, connection, message, queue)?)
+    }
+
+    fn finish_if_uncongested(
+        &mut self,
+        params: &mut SenderParams,
+        connection_entity: Entity,
+    ) -> Result {
+        let Some(state) = self.connections.get(&connection_entity) else {
+            return Ok(());
+        };
+
+        if !state.uncongested() {
+            return Ok(());
+        }
+
+        let (connection, connection_of) = params.connection_q.get(connection_entity)?;
+
+        let mut endpoint = params.endpoint_q.get_mut(**connection_of)?;
+
+        let connection = endpoint.get_connection(connection)?;
+
+        connection.finish_send_stream(state.stream_id())?;
+
+        self.connections.remove(&connection_entity);
+
+        Ok(())
+    }
+
+    fn finish_all_if_uncongested(&mut self, params: &mut SenderParams) -> Result {
+        let mut finished_states = Vec::new();
+
+        for (&connection_entity, state) in self.connections.iter() {
+            if !state.uncongested() {
+                continue;
+            }
+
+            let (connection, connection_of) = params.connection_q.get(connection_entity)?;
+
+            let mut endpoint = params.endpoint_q.get_mut(**connection_of)?;
+
+            let connection = endpoint.get_connection(connection)?;
+
+            connection.finish_send_stream(state.stream_id())?;
+
+            finished_states.push(connection_entity);
+        }
+
+        for connection_entity in finished_states {
+            self.connections.remove(&connection_entity);
+        }
+
+        Ok(())
+    }
+
+    fn take_state(&mut self, connection_entity: Entity) -> Option<MessageSendStreamState> {
+        self.connections.remove(&connection_entity)
+    }
+}
+
+impl<'w, 's> LocalMessageSender<'w, 's> {
+    /// Drives state machines for all connections to completion.
+    ///
+    /// Should be called regularly to ensure messages that are still in buffers are sent.
+    pub fn flush(&mut self) -> Result {
+        self.state.flush(&mut self.params)
+    }
+
+    /// Attempts to send a message on a connection.
+    /// Returns `true` if the message was sent and `false` if it was blocked by congestion.
+    /// Passing `true` into `queue` will bypass this and always queue the message the message to be sent
+    /// once unblocked.
+    ///
+    /// Will open a new stream if this message sender doesn't have one yet.
+    ///
+    /// The provided stream header should be the unique id that the peer is expecting.
+    /// See [MessageStreamHeader](crate::messages::MessageStreamHeader).
+    pub fn write<T>(
+        &mut self,
+        header: impl Into<u16>,
+        connection_entity: Entity,
+        message_id: MessageId<T>,
+        queue: bool,
+        message: &T,
+    ) -> Result<bool>
+    where
+        T: Serialize,
+    {
+        self.state.write::<T>(
+            &mut self.params,
+            header,
+            connection_entity,
+            message_id,
+            queue,
+            message,
+        )
+    }
+
+    /// Finishes the message stream for a connection if it is not blocked on congestion.
+    ///
+    /// If it does not exist will do nothing.
+    pub fn finish_if_uncongested(&mut self, connection_entity: Entity) -> Result {
+        self.state
+            .finish_if_uncongested(&mut self.params, connection_entity)
+    }
+
+    /// Finishes any message streams that are not blocked on congestion.
+    ///
+    /// This is intended to be used by systems that send messages infrequently by
+    /// running this after [Self::flush] at the beggining of the system to finish unused streams.
+    pub fn finish_all_if_uncongested(&mut self) -> Result {
+        self.state.finish_all_if_uncongested(&mut self.params)
+    }
+
+    /// Removes the state machine for a connection if it exists, giving responsibility of the stream to the caller.
+    pub fn take_state(&mut self, connection_entity: Entity) -> Option<MessageSendStreamState> {
+        self.state.take_state(connection_entity)
+    }
+}
+
+impl<'w, 's, S> SharedMessageSender<'w, 's, S>
+where
+    S: Send + Sync + 'static,
+{
+    /// Attempts to send a message on a connection.
+    /// Returns `true` if the message was sent and `false` if it was blocked by congestion.
+    /// Passing `true` into `queue` will bypass this and always queue the message the message to be sent
+    /// once unblocked.
+    ///
+    /// Will open a new stream if this message sender doesn't have one yet.
+    ///
+    /// The provided stream header should be the unique id that the peer is expecting.
+    /// See [MessageStreamHeader](crate::messages::MessageStreamHeader).
+    pub fn write<T>(
+        &mut self,
+        header: impl Into<u16>,
+        connection_entity: Entity,
+        message_id: MessageId<T>,
+        queue: bool,
+        message: &T,
+    ) -> Result<bool>
+    where
+        T: Serialize,
+    {
+        self.state.state.write::<T>(
+            &mut self.params,
+            header,
+            connection_entity,
+            message_id,
+            queue,
+            message,
+        )
+    }
+
+    /// Finishes the message stream for a connection if it is not blocked on congestion.
+    ///
+    /// If it does not exist will do nothing.
+    pub fn finish_if_uncongested(&mut self, connection_entity: Entity) -> Result {
+        self.state
+            .state
+            .finish_if_uncongested(&mut self.params, connection_entity)
+    }
+
+    /// Finishes any message streams that are not blocked on congestion.
+    ///
+    /// This is intended to be used by systems that send messages infrequently by
+    /// running this every update to finish unused streams.
+    pub fn finish_all_if_uncongested(&mut self) -> Result {
+        self.state.state.finish_all_if_uncongested(&mut self.params)
+    }
+
+    /// Removes the state machine for a connection if it exists, giving responsibility of the stream to the caller.
+    pub fn take_state(&mut self, connection_entity: Entity) -> Option<MessageSendStreamState> {
+        self.state.state.take_state(connection_entity)
+    }
+}
+
+/// Trait extension for [App](crate::App) that allows adding a [SharedMessageSender].
 pub trait AddSharedSender {
     /// Adds a [SharedNetMessageSender] to the app that will flush in a certain schedule.
     ///
     /// If added to the same schedule that [NevyPlugin](crate::NevyPlugin) runs in it will flush before [UpdateEndpointSystems](crate::UpdateEndpointSystems).
-    fn add_shared_sender_with_schedule<S>(&mut self, nevy_schedule: impl ScheduleLabel)
+    fn add_shared_sender_with_schedule<S>(
+        &mut self,
+        nevy_schedule: impl ScheduleLabel,
+    ) -> &mut Self
     where
         S: Send + Sync + 'static;
 
-    /// Adds a [SharedNetMessageSender] to the app that will flush in the default schedule for nevy.
-    fn add_shared_sender<S>(&mut self)
+    /// Adds a [SharedMessageSender] to the app that will flush in the default schedule for nevy.
+    fn add_shared_sender<S>(&mut self) -> &mut Self
     where
         S: Send + Sync + 'static,
     {
         self.add_shared_sender_with_schedule::<S>(DEFAULT_NEVY_SCHEDULE);
+        self
     }
+
+    fn set_shared_sender_priority<S>(&mut self, stream_priority: impl Into<i32>) -> &mut Self
+    where
+        S: Send + Sync + 'static;
 }
 
 impl AddSharedSender for App {
-    fn add_shared_sender_with_schedule<S>(&mut self, nevy_schedule: impl ScheduleLabel)
+    fn add_shared_sender_with_schedule<S>(&mut self, nevy_schedule: impl ScheduleLabel) -> &mut Self
     where
         S: Send + Sync + 'static,
     {
         self.insert_resource(SharedNetMessageSenderState::<S> {
             _p: PhantomData,
             state: SenderState::default(),
+            stream_priority: 0,
         });
 
         self.add_systems(
             nevy_schedule,
             flush_shared_sender::<S>.before(UpdateEndpointSystems),
         );
+
+        self
+    }
+
+    fn set_shared_sender_priority<S>(&mut self, stream_priority: impl Into<i32>) -> &mut Self
+    where
+        S: Send + Sync + 'static,
+    {
+        self.world_mut()
+            .resource_mut::<SharedMessageSenderState<S>>()
+            .stream_priority = stream_priority.into();
+
+        self
     }
 }
 
