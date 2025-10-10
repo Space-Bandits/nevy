@@ -354,6 +354,10 @@ impl ConnectionState {
             .recv()
             .map(|data| Vec::from(data).into())
     }
+
+    pub fn accept_uni_stream(&self) -> Option<StreamId> {
+        todo!()
+    }
 }
 
 /// Events to do with streams.
