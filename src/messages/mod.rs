@@ -266,7 +266,7 @@ fn read_message_streams(
 
         let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
-        let connection = endpoint.get_connection(connection)?;
+        let mut connection = endpoint.get_connection(connection)?;
 
         let mut finished = Vec::new();
 

@@ -58,7 +58,7 @@ fn send_message(
         let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
         // get the connection state from the endpoint
-        let connection = endpoint.get_connection(connection)?;
+        let mut connection = endpoint.get_connection(connection)?;
 
         // open a unidirectional stream on the connection.
         let stream_id = connection.open_stream(Dir::Uni)?;
@@ -86,7 +86,7 @@ fn close_connection(
 
         let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
-        let connection = endpoint.get_connection(connection)?;
+        let mut connection = endpoint.get_connection(connection)?;
 
         if connection.get_open_send_streams() == 0 {
             connection.close(0, default())?;

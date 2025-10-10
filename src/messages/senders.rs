@@ -8,8 +8,8 @@ use quinn_proto::Dir;
 use serde::Serialize;
 
 use crate::{
-    DEFAULT_NEVY_SCHEDULE,
-    connection::{ConnectionState, StreamWriteError},
+    ConnectionMut, DEFAULT_NEVY_SCHEDULE,
+    connection::StreamWriteError,
     headers::HeaderedStreamState,
     messages::{
         ConnectionOf, NetMessageId, QuicConnection, QuicEndpoint, StreamId, UpdateEndpoints,
@@ -60,7 +60,7 @@ impl NetMessageSendStreamState {
     /// Writes as much of the internal buffer as possible to the connection.
     ///
     /// This should be called frequently even if messages aren't being written to make sure that all data is sent.
-    pub fn flush(&mut self, connection: &mut ConnectionState) -> Result<(), StreamWriteError> {
+    pub fn flush(&mut self, connection: ConnectionMut) -> Result<(), StreamWriteError> {
         if self.buffer.len() == 0 {
             return Ok(());
         }
@@ -84,7 +84,7 @@ impl NetMessageSendStreamState {
     pub fn write<T>(
         &mut self,
         message_id: NetMessageId<T>,
-        connection: &mut ConnectionState,
+        connection: ConnectionMut,
         message: &T,
         queue: bool,
     ) -> Result<bool, StreamWriteError>
@@ -270,7 +270,7 @@ pub trait NetMessageSender<'w, 's>: NetMessageSenderContext<'w, 's> {
 
         let mut endpoint = params.endpoint_q.get_mut(**connection_of)?;
 
-        let connection = endpoint.get_connection(connection)?;
+        let mut connection = endpoint.get_connection(connection)?;
 
         let state = match state.connections.entry(connection_entity) {
             bevy::platform::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -330,7 +330,7 @@ pub trait NetMessageSender<'w, 's>: NetMessageSenderContext<'w, 's> {
 
         let mut endpoint = params.endpoint_q.get_mut(**connection_of)?;
 
-        let connection = endpoint.get_connection(connection)?;
+        let mut connection = endpoint.get_connection(connection)?;
 
         connection.finish_send_stream(stream_state.stream_id())?;
 
@@ -356,7 +356,7 @@ pub trait NetMessageSender<'w, 's>: NetMessageSenderContext<'w, 's> {
 
             let mut endpoint = params.endpoint_q.get_mut(**connection_of)?;
 
-            let connection = endpoint.get_connection(connection)?;
+            let mut connection = endpoint.get_connection(connection)?;
 
             connection.finish_send_stream(stream_state.stream_id())?;
 
