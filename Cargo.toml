@@ -1,6 +1,6 @@
 [package]
 name = "nevy"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 categories = ["network-programming", "game-development"]
 description = "QUIC implementation with quinn for the bevy game engine"

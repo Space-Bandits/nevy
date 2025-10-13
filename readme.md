@@ -97,4 +97,4 @@ The entity can be reused for another connection once it's `ConnectionOf` compone
 | Bevy | Nevy |
 | -----| ---- |
 | 0.16 | 0.1  |
-| 0.17 | 0.2  |
+| 0.17 | 0.2.2  |
