@@ -294,7 +294,6 @@ pub trait NetMessageSender<'w, 's>: NetMessageSenderContext<'w, 's> {
     /// Will use the default stream header from [`NetMessageSendHeader`], if you want to choose the stream header see [`NetMessageSender::write_with_header`].
     fn write<T>(
         &mut self,
-        params: &mut SenderParams,
         connection_entity: Entity,
         message_id: NetMessageId<T>,
         queue: bool,
@@ -303,6 +302,8 @@ pub trait NetMessageSender<'w, 's>: NetMessageSenderContext<'w, 's> {
     where
         T: Serialize,
     {
+        let (params, _) = self.context();
+
         let header = params
             .stream_header
             .as_ref()
