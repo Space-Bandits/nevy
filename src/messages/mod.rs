@@ -96,7 +96,7 @@ struct NextNetMessageId(u16);
 
 /// Trait extension for [App](crate::App) that allows assigning adding messages.
 pub trait AddNetMessage {
-    fn add_message<T>(&mut self)
+    fn add_net_message<T>(&mut self)
     where
         T: Serialize + DeserializeOwned + Send + Sync + 'static;
 }
@@ -106,7 +106,7 @@ impl AddNetMessage for App {
     ///
     /// The order that messages are added to an app is what defines the protocol and should be identical for both the server and client.
     /// The best way of accomplishing this would be through a function or plugin that is in a shared dependency both binaries.
-    fn add_message<T>(&mut self)
+    fn add_net_message<T>(&mut self)
     where
         T: Serialize + DeserializeOwned,
         NetMessageId<T>: Resource,
