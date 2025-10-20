@@ -325,11 +325,23 @@ fn read_message_streams(
                             continue;
                         };
 
-                        *stream_state = NetMessageRecvStreamState::ReadingNetMessage {
-                            message_id: *message_id,
-                            length,
-                            buffer: Vec::new(),
-                        };
+                        if length == 0 {
+                            buffers
+                                .messages
+                                .entry(*message_id)
+                                .or_default()
+                                .push_back(default());
+
+                            *stream_state = NetMessageRecvStreamState::ReadingId {
+                                buffer: U16Reader::new(),
+                            };
+                        } else {
+                            *stream_state = NetMessageRecvStreamState::ReadingNetMessage {
+                                message_id: *message_id,
+                                length,
+                                buffer: Vec::new(),
+                            };
+                        }
                     }
                     NetMessageRecvStreamState::ReadingNetMessage {
                         message_id,
