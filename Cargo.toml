@@ -16,10 +16,16 @@ quic = ["nevy_transport/quic"]
 [dependencies]
 nevy_transport.path = "crates/nevy_transport"
 
+[dev-dependencies]
+rustls = { version = "0.23.5", default-features = false, features = ["std"] }
+rcgen = "0.13.1"
+bevy = { version = "0.17" }
+
 [workspace]
 resolver = "3"
 members = ["crates/*"]
 
 [workspace.dependencies]
 bevy = { version = "0.17", default-features = false }
+log = "0.4"
 # bincode = { version = "2.0", features = ["serde"], optional = true }

@@ -16,6 +16,7 @@ quic = ["dep:quinn-proto", "dep:quinn-udp", "dep:bytes"]
 
 [dependencies]
 bevy.workspace = true
+log.workspace = true
 
 thiserror = "2.0"
 
