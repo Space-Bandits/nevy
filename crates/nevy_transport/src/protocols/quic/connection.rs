@@ -1,11 +1,12 @@
 use std::{collections::VecDeque, net::UdpSocket};
 
 use bevy::prelude::*;
+use bytes::Bytes;
 use quinn_proto::{Dir, StreamEvent, VarInt};
 use quinn_udp::UdpSocketState;
 
 use crate::{
-    Connection, ConnectionContext, NewStreamError, Stream, StreamId, StreamRequirements,
+    Connection, ConnectionContext, Stream, StreamId, StreamRequirements,
     protocols::quic::udp_transmit,
 };
 
@@ -30,6 +31,15 @@ impl StreamId for QuicStreamId {
 
     fn clone(&self) -> crate::Stream {
         Stream::new(<Self as Clone>::clone(self))
+    }
+
+    fn eq(&self, rhs: &Stream) -> bool {
+        match (self, rhs.as_stream::<Self>()) {
+            (_, Err(_)) => false,
+            (Self::Datagrams, Ok(Self::Datagrams)) => true,
+            (Self::Stream(id1), Ok(Self::Stream(id2))) => id1 == id2,
+            _ => false,
+        }
     }
 }
 
@@ -82,7 +92,7 @@ impl<'a> Drop for QuicConnectionContext<'a> {
 }
 
 impl<'a> ConnectionContext for QuicConnectionContext<'a> {
-    fn reborrow<'b>(&'b mut self) -> crate::Connection<'b> {
+    fn reborrow<'b>(&'b mut self) -> Connection<'b> {
         Connection(Box::new(QuicConnectionContext {
             connection: self.connection,
             send_buffer: self.send_buffer,
@@ -92,7 +102,7 @@ impl<'a> ConnectionContext for QuicConnectionContext<'a> {
         }))
     }
 
-    fn new_stream(&mut self, requirements: StreamRequirements) -> Result<Stream, NewStreamError> {
+    fn new_stream(&mut self, requirements: StreamRequirements) -> Result<Stream> {
         match requirements {
             StreamRequirements {
                 ordered: false,
@@ -113,5 +123,32 @@ impl<'a> ConnectionContext for QuicConnectionContext<'a> {
                 Ok(Stream::new(QuicStreamId::Stream(stream_id)))
             }
         }
+    }
+
+    fn write(&mut self, stream: &Stream, data: &[u8], block: bool) -> Result<usize> {
+        Ok(match stream.as_stream::<QuicStreamId>()? {
+            QuicStreamId::Datagrams => {
+                self.connection
+                    .connection
+                    .datagrams()
+                    .send(Bytes::copy_from_slice(data), !block)
+                    .map_err(|err| BevyError::from(err))?;
+
+                data.len()
+            }
+            &QuicStreamId::Stream(stream_id) => self
+                .connection
+                .connection
+                .send_stream(stream_id)
+                .write(data)?,
+        })
+    }
+
+    fn close_send_stream(&mut self, stream: &Stream, graceful: bool) {
+        todo!()
+    }
+
+    fn close_recv_stream(&mut self, stream: &Stream, graceful: bool) {
+        todo!()
     }
 }

@@ -76,22 +76,61 @@ pub struct Connection<'a>(Box<dyn ConnectionContext + 'a>);
 pub trait ConnectionContext {
     fn reborrow<'b>(&'b mut self) -> Connection<'b>;
 
-    fn new_stream(&mut self, requirements: StreamRequirements) -> Result<Stream, NewStreamError>;
+    /// Returns a [`Stream`] id of a stream that meets certain [`StreamRequirements`].
+    ///
+    /// If ordering is not required then the implementation may return a stream id of an existing stream.
+    fn new_stream(&mut self, requirements: StreamRequirements) -> Result<Stream>;
 
-    fn is_send_stream(&self, stream: &Stream) -> Result<bool, InvalidStreamError>;
+    /// Attempts to write a piece of data to a stream.
+    ///
+    /// If successful, the number of bytes written is returned.
+    ///
+    /// `block` determines what happens when the stream is congested.
+    /// If `block` is set to false then bytes may be accepted and `Ok(1..)` values will be returned,
+    /// however previously written data may be lost.
+    /// If `block` is set to true then data will never be accepted if it cannot be sent.
+    ///
+    /// What does it mean for `block` to be `false` on a reliable stream?
+    /// Some implementations may discard previously written chunks,
+    /// but guarantee transmission of the most recently written one.
+    /// For full reliability in all cases, always set `block` to `true`.
+    fn write(&mut self, stream: &Stream, data: &[u8], block: bool) -> Result<usize>;
 
-    fn is_recv_stream(&self, stream: &Stream) -> Result<bool, InvalidStreamError>;
+    /// Attempts to close a stream from the sending end.
+    ///
+    /// Not all streams require closing, but some do.
+    /// All users should close streams when they are finished with them.
+    ///
+    /// Some implementations may be able to gracefully close, or reset streams.
+    /// Ungracefully closing streams should be used when your own internal errors are encountered.
+    ///
+    /// In cases where implementations have only one way of closing streams `graceful` has no effect.
+    fn close_send_stream(&mut self, stream: &Stream, graceful: bool);
 
-    fn write(&mut self, stream: &Stream, data: &[u8]) -> Result<usize, InvalidStreamError>;
-
-    fn close_stream(&mut self, stream: &Stream, graceful: bool) -> Result<(), InvalidStreamError>;
+    /// Attempts to close a stream from the receiving end.
+    ///
+    /// Closing streams from the receiving end is never required and not always possible.
+    /// Don't assume a stream is closed just because you called this method.
+    ///
+    /// Some implementations may be able to gracefully close, or reset streams.
+    /// Ungracefully closing streams should be used when your own internal errors are encountered.
+    ///
+    /// In cases where implementations have only one way of closing streams `graceful` has no effect.
+    fn close_recv_stream(&mut self, stream: &Stream, graceful: bool);
 }
 
+/// An id for a stream on a connection that is either send, receive or both.
+///
+/// Internally it uses dynamic dispatch to type erase the specific implementation.
 pub struct Stream(Box<dyn StreamId>);
 
 impl Stream {
-    pub fn as_stream<T: 'static>(&self) -> Result<&T, MismatchedStreamError> {
-        self.0.as_any().downcast_ref().ok_or(MismatchedStreamError)
+    pub fn as_stream<T: 'static>(&self) -> Result<&T> {
+        Ok(self
+            .0
+            .as_any()
+            .downcast_ref()
+            .ok_or(MismatchedStreamError)?)
     }
 
     pub fn new<T: StreamId + 'static>(stream: T) -> Self {
@@ -102,12 +141,22 @@ impl Stream {
 pub trait StreamId {
     fn as_any(&self) -> &dyn Any;
 
+    /// Use to impl [`Clone`].
     fn clone(&self) -> Stream;
+
+    /// Used to impl [`PartialEq`] and [`Eq`].
+    fn eq(&self, rhs: &Stream) -> bool;
 }
 
 impl Clone for Stream {
     fn clone(&self) -> Self {
         self.0.clone()
+    }
+}
+
+impl PartialEq for Stream {
+    fn eq(&self, rhs: &Stream) -> bool {
+        self.0.eq(rhs)
     }
 }
 
@@ -130,20 +179,5 @@ pub struct StreamRequirements {
 pub struct UnsupportedStreamRequirementsError(StreamRequirements);
 
 #[derive(Error, Debug)]
-#[error("Unable to create a new stream")]
-pub enum NewStreamError {
-    UnsupportedStreamRequirements(#[from] UnsupportedStreamRequirementsError),
-    #[error("The transport layer was unable to create a new stream")]
-    TransportError,
-}
-
-#[derive(Error, Debug)]
 #[error("The stream did not exist in a certain direction")]
 pub struct NonexistentStreamError;
-
-#[derive(Error, Debug)]
-#[error("The stream was invalid for this connection")]
-pub enum InvalidStreamError {
-    MismatchedStreamId(#[from] MismatchedStreamError),
-    NonexistentStream(#[from] NonexistentStreamError),
-}
