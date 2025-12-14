@@ -1,6 +1,7 @@
 use std::any::Any;
 
 use bevy::prelude::*;
+use bytes::Bytes;
 use thiserror::Error;
 
 pub mod prelude;
@@ -94,29 +95,38 @@ pub trait ConnectionContext {
     /// Some implementations may discard previously written chunks,
     /// but guarantee transmission of the most recently written one.
     /// For full reliability in all cases, always set `block` to `true`.
-    fn write(&mut self, stream: &Stream, data: &[u8], block: bool) -> Result<usize>;
+    fn write(&mut self, stream: &Stream, data: Bytes, block: bool) -> Result<usize>;
+
+    /// Attempts to read a chunk of data from a stream.
+    ///
+    /// The return type has two nested results.
+    /// If the first result is `Err` then there was some critical failure.
+    /// The second result returns an `Err` when either the stream is blocked or closed.
+    fn read(&mut self, stream: &Stream) -> Result<Result<Bytes, StreamReadError>>;
 
     /// Attempts to close a stream from the sending end.
     ///
     /// Not all streams require closing, but some do.
-    /// All users should close streams when they are finished with them.
+    /// All users should close streams when they are finished with them regardless.
     ///
-    /// Some implementations may be able to gracefully close, or reset streams.
-    /// Ungracefully closing streams should be used when your own internal errors are encountered.
-    ///
-    /// In cases where implementations have only one way of closing streams `graceful` has no effect.
-    fn close_send_stream(&mut self, stream: &Stream, graceful: bool);
+    /// Some implementations may be able to either gracefully close, or reset streams.
+    /// Setting `graceful` to `true` will guarantee that all written data will be transmitted.
+    /// Ungracefully closing streams should be used when your own internal errors are encountered and transmitting remaining data is not important.
+    fn close_send_stream(&mut self, stream: &Stream, graceful: bool) -> Result;
 
     /// Attempts to close a stream from the receiving end.
     ///
     /// Closing streams from the receiving end is never required and not always possible.
-    /// Don't assume a stream is closed just because you called this method.
+    /// Closing a stream is normally the sender's responsibility, but if you encounter an internal error
+    /// and it is no longer important to receive remaining data, you can close the stream.
     ///
-    /// Some implementations may be able to gracefully close, or reset streams.
-    /// Ungracefully closing streams should be used when your own internal errors are encountered.
-    ///
-    /// In cases where implementations have only one way of closing streams `graceful` has no effect.
-    fn close_recv_stream(&mut self, stream: &Stream, graceful: bool);
+    /// It is still your responsibility to read any data that is produced by the stream.
+    fn close_recv_stream(&mut self, stream: &Stream) -> Result;
+
+    /// Returns a receive stream if there is a new one that has been opened by the client.
+    /// Also returns the requirements that the stream is guaranteed to meet.
+    /// If it is bidirectional this means that it is also a send stream.
+    fn accept_stream(&mut self) -> Option<(Stream, StreamRequirements)>;
 }
 
 /// An id for a stream on a connection that is either send, receive or both.
@@ -138,7 +148,7 @@ impl Stream {
     }
 }
 
-pub trait StreamId {
+pub trait StreamId: Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
 
     /// Use to impl [`Clone`].
@@ -160,19 +170,65 @@ impl PartialEq for Stream {
     }
 }
 
-#[derive(Error, Debug)]
-#[error("Stream was for a different type of transport")]
-pub struct MismatchedStreamError;
-
 /// Specifies the requirements for a stream when opening it.
 ///
 /// When you create a stream you are garunteed to have *at least* these requirements if the operation is a success.
 #[derive(Clone, Copy, Debug)]
 pub struct StreamRequirements {
-    ordered: bool,
     reliable: bool,
+    ordered: bool,
     bidirectional: bool,
 }
+
+impl StreamRequirements {
+    /// No reliability, ordering, not bidirectional
+    pub const UNRELIABLE: Self = Self {
+        reliable: false,
+        ordered: false,
+        bidirectional: false,
+    };
+
+    /// Reliable, no ordering, not bidirectional
+    pub const RELIABLE: Self = Self {
+        reliable: true,
+        ordered: false,
+        bidirectional: false,
+    };
+
+    /// Reliable, ordered, not bidirectional
+    pub const RELIABLE_ORDERED: Self = Self {
+        reliable: true,
+        ordered: true,
+        bidirectional: false,
+    };
+
+    pub fn with_reliable(self, reliable: bool) -> Self {
+        StreamRequirements { reliable, ..self }
+    }
+
+    pub fn with_ordered(self, ordered: bool) -> Self {
+        StreamRequirements { ordered, ..self }
+    }
+
+    pub fn with_bidirectional(self, bidirectional: bool) -> Self {
+        StreamRequirements {
+            bidirectional,
+            ..self
+        }
+    }
+}
+
+/// Reason why reading a stream wasn't successful, but not a critical failure.
+pub enum StreamReadError {
+    /// The stream is blocked, but may return more data later.
+    Blocked,
+    /// The stream is closed and will never yield more data.
+    Closed,
+}
+
+#[derive(Error, Debug)]
+#[error("Stream was for a different type of transport")]
+pub struct MismatchedStreamError;
 
 #[derive(Error, Debug)]
 #[error("Connection was unable to provide a stream with the requested requirements {0:?}")]

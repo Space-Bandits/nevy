@@ -81,6 +81,7 @@ pub(super) fn create_connections(
     let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
     let Some(endpoint) = endpoint.as_transport::<QuicEndpoint>() else {
+        // Another transport layer is responsible for this connection.
         return Ok(());
     };
 
@@ -109,6 +110,10 @@ pub(super) fn create_connections(
                 }
             }
             Ok((connection_handle, connection)) => {
+                endpoint
+                    .connection_handles
+                    .insert(connection_entity, connection_handle);
+
                 endpoint.connections.insert(
                     connection_handle,
                     QuicConnectionState {
@@ -152,6 +157,10 @@ pub(super) fn create_connections(
                 return Ok(());
             }
         };
+
+        endpoint
+            .connection_handles
+            .insert(connection_entity, connection_handle);
 
         endpoint.connections.insert(
             connection_handle,
@@ -261,7 +270,6 @@ impl QuicEndpoint {
     /// - A bind address for the UDP socket.
     /// - A [quin_proto] endpoint config
     /// - A [quin_proto] server config. If this is `None` then the endpoint won't be able to accept incoming connections.
-    /// - An [IncomingConnectionHandler] responsible for deciding whether to accept connections.
     pub fn new(
         bind_addr: impl ToSocketAddrs,
         endpoint_config: quinn_proto::EndpointConfig,

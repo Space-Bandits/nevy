@@ -17,6 +17,7 @@ fn main() {
     app.add_systems(Startup, setup);
     app.add_observer(accept_connections);
     app.add_observer(log_status_changes);
+    app.add_systems(Update, (accept_streams, read_streams));
 
     app.run();
 }
@@ -43,7 +44,70 @@ fn accept_connections(
 
     commands
         .entity(insert.entity)
-        .insert(ConnectionOf(endpoint_entity));
+        .insert((ConnectionOf(endpoint_entity), ConnectionStreams::default()));
+
+    Ok(())
+}
+
+#[derive(Component, Default, Deref, DerefMut)]
+struct ConnectionStreams(Vec<(Stream, Vec<u8>)>);
+
+fn accept_streams(
+    mut connection_q: Query<(Entity, &ConnectionOf, &mut ConnectionStreams)>,
+    mut endpoint_q: Query<&mut Endpoint>,
+) -> Result {
+    for (connection_entity, &ConnectionOf(endpoint_entity), mut streams) in &mut connection_q {
+        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
+
+        let mut connection = endpoint
+            .get_connection(connection_entity)
+            .ok_or("Connection should exist")?;
+
+        while let Some((stream, _)) = connection.accept_stream() {
+            streams.push((stream, Vec::new()));
+        }
+    }
+
+    Ok(())
+}
+
+fn read_streams(
+    mut connection_q: Query<(Entity, &ConnectionOf, &mut ConnectionStreams)>,
+    mut endpoint_q: Query<&mut Endpoint>,
+) -> Result {
+    for (connection_entity, &ConnectionOf(endpoint_entity), mut streams) in &mut connection_q {
+        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
+
+        let mut connection = endpoint
+            .get_connection(connection_entity)
+            .ok_or("Connection should exist")?;
+
+        let mut closed_streams = Vec::with_capacity(streams.len());
+
+        for &mut (ref stream, ref mut buffer) in streams.iter_mut() {
+            closed_streams.push(loop {
+                match connection.read(stream)? {
+                    Ok(chunk) => {
+                        info!("Received {} bytes", chunk.len());
+                        buffer.extend(chunk);
+                    }
+                    Err(StreamReadError::Blocked) => break true,
+                    Err(StreamReadError::Closed) => break false,
+                }
+            });
+        }
+
+        let mut closed_streams = closed_streams.into_iter();
+        streams.retain(|(_, buffer)| {
+            let keep = closed_streams.next().unwrap_or(false);
+
+            if !keep {
+                info!("Received message {:?}", str::from_utf8(buffer));
+            }
+
+            keep
+        });
+    }
 
     Ok(())
 }

@@ -1,6 +1,6 @@
 pub use crate::{
-    Connection, ConnectionContext, ConnectionOf, ConnectionStatus, Endpoint, EndpointOf, Transport,
-    TransportUpdateSystems,
+    Connection, ConnectionContext, ConnectionOf, ConnectionStatus, Endpoint, EndpointOf, Stream,
+    StreamReadError, StreamRequirements, Transport, TransportUpdateSystems,
 };
 
 #[cfg(feature = "quic")]

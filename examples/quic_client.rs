@@ -16,6 +16,7 @@ fn main() {
 
     app.add_systems(Startup, setup);
     app.add_observer(log_status_changes);
+    app.add_systems(Update, write_messages);
 
     app.run();
 }
@@ -43,6 +44,33 @@ fn log_status_changes(
 ) -> Result {
     let status = status_q.get(insert.entity)?;
     info!("Connection status changed to {:?}", status);
+    Ok(())
+}
+
+fn write_messages(
+    connection_q: Query<(Entity, &ConnectionOf, &ConnectionStatus), Changed<ConnectionStatus>>,
+    mut endpoint_q: Query<&mut Endpoint>,
+) -> Result {
+    for (connection_entity, &ConnectionOf(endpoint_entity), status) in &connection_q {
+        let ConnectionStatus::Established = status else {
+            continue;
+        };
+
+        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
+
+        let mut connection = endpoint
+            .get_connection(connection_entity)
+            .ok_or("Connection should exist")?;
+
+        let stream = connection.new_stream(StreamRequirements::RELIABLE)?;
+
+        let written = connection.write(&stream, "Hello server!".as_bytes().into(), false)?;
+
+        info!("Wrote {} bytes", written);
+
+        connection.close_send_stream(&stream, true)?;
+    }
+
     Ok(())
 }
 
