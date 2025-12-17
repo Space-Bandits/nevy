@@ -1,17 +1,61 @@
 use std::any::Any;
 
-use bevy::prelude::*;
+use bevy::{
+    app::PluginGroupBuilder,
+    ecs::{intern::Interned, schedule::ScheduleLabel},
+    prelude::*,
+};
 use bytes::Bytes;
 use thiserror::Error;
 
 pub mod prelude;
 pub mod protocols;
 
+/// The schedule where implementations place their update systems by default.
 pub const DEFAULT_TRANSPORT_SCHEDULE: PostUpdate = PostUpdate;
 
+/// The system set where implementations place their update systems.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct TransportUpdateSystems;
 
+/// Adds plugins for all transport protocols that have been feature enabled.
+///
+/// You can also add the same plugins manually.
+///
+/// Systems are in the [`DEFAULT_TRANSPORT_SCHEDULE`]
+/// unless constructed with [`NevyTransportPlugins::new`].
+pub struct NevyTransportPlugins {
+    schedule: Interned<dyn ScheduleLabel>,
+}
+
+impl NevyTransportPlugins {
+    pub fn new(schedule: impl ScheduleLabel) -> Self {
+        NevyTransportPlugins {
+            schedule: schedule.intern(),
+        }
+    }
+}
+
+impl Default for NevyTransportPlugins {
+    fn default() -> Self {
+        Self::new(DEFAULT_TRANSPORT_SCHEDULE)
+    }
+}
+
+impl PluginGroup for NevyTransportPlugins {
+    fn build(self) -> PluginGroupBuilder {
+        let builder = PluginGroupBuilder::start::<Self>();
+
+        #[cfg(feature = "quic")]
+        let builder = builder.add(protocols::quic::QuicTransportPlugin::new(self.schedule));
+
+        builder
+    }
+}
+
+/// [`RelationshipTarget`] of [`ComponentOf`].
+///
+/// Stores all connection entities on this endpoint.
 #[derive(Component, Deref)]
 #[relationship_target(relationship = ConnectionOf)]
 pub struct EndpointOf(Vec<Entity>);
@@ -31,17 +75,23 @@ impl<'a> IntoIterator for &'a EndpointOf {
     }
 }
 
-/// The lifecycle of this component is the lifecycle of its connection.
+/// [`Relationship`](bevy::ecs::relationship::Relationship) to [`EndpointOf`].
 ///
-/// Inserting this component yourself is how you open a connection.
-/// Some endpoints will provide entities with incoming connections,
-/// and will accept them if you insert this component on that entity.
+/// The lifecycle of this component is the lifecycle of the connection on it's endpoint.
+///
+/// The user is the one who inserts this component,
+/// which is how connections are both initiated and accepted.
+/// What other components are present, depending on the endpoint implementation,
+/// is what controls how the connection is created.
 #[derive(Component, Deref)]
 #[component(immutable)]
 #[relationship(relationship_target = EndpointOf)]
 #[require(ConnectionStatus)]
 pub struct ConnectionOf(pub Entity);
 
+/// Inserted when a [`ConnectionOf`] component is inserted.
+///
+/// This component is immutable, so it's lifecycle events can be used to respond to changes in the connection status.
 #[derive(Component, Default, Debug, Clone, Copy)]
 #[component(immutable)]
 pub enum ConnectionStatus {
@@ -52,6 +102,10 @@ pub enum ConnectionStatus {
     Failed,
 }
 
+/// An endpoint. Uses dynamic dispatch to provide a type erased api to a [`Transport`] implementation.
+///
+/// Use the [`Entity`] of the associated connection entities related by [`ConnectionOf`]
+/// to obtain a [`Connection`] which can be used to perform stream operations.
 #[derive(Component, Deref, DerefMut)]
 pub struct Endpoint(Box<dyn Transport>);
 
@@ -68,6 +122,7 @@ impl Endpoint {
 pub trait Transport: Send + Sync {
     fn as_any<'a>(&'a mut self) -> &'a mut dyn Any;
 
+    /// Gets the [`Connection`] of an [`Entity`] that is related to this [`Endpoint`] by a [`ConnectionOf`].
     fn get_connection<'a>(&'a mut self, connection_entity: Entity) -> Option<Connection<'a>>;
 }
 
@@ -138,6 +193,8 @@ pub trait ConnectionContext {
 }
 
 /// An id for a stream on a connection that is either send, receive or both.
+///
+/// Obtained by performing stream operations on a [`Connection`].
 ///
 /// Internally it uses dynamic dispatch to type erase the specific implementation.
 pub struct Stream(Box<dyn StreamId>);

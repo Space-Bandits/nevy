@@ -9,6 +9,10 @@ pub use quinn_proto;
 pub mod connection;
 pub mod endpoint;
 
+/// Adds QUIC transport functionality to the app.
+///
+/// Systems are in the [`DEFAULT_TRANSPORT_SCHEDULE`]
+/// unless constructed with [`QuicTransportPlugin::new`].
 pub struct QuicTransportPlugin {
     schedule: Interned<dyn ScheduleLabel>,
 }

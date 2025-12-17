@@ -27,6 +27,7 @@ pub(crate) enum CloseFlagState {
     Received,
 }
 
+/// A quic stream id that gets type erased by [`Stream`].
 #[derive(Clone, Copy)]
 pub enum QuicStreamId {
     /// Stream id for sending datagrams on.
@@ -56,6 +57,9 @@ impl StreamId for QuicStreamId {
     }
 }
 
+/// Gets wrapped in a [`Connection`] and contains the context needed for performing type erased operations on a QUIC connection.
+///
+/// When dropped will attempt to transmit outstanding data.
 pub struct QuicConnectionContext<'a> {
     pub(crate) connection: &'a mut QuicConnectionState,
     pub(crate) send_buffer: &'a mut Vec<u8>,

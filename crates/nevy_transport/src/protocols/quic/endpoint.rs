@@ -23,6 +23,9 @@ use crate::{
     },
 };
 
+/// Used to initiate a connection on a [`QuicEndpoint`] [`Endpoint`]
+///
+/// When present on an entity when a [`ConnectionOf`] component is inserted it will be used to open a connection.
 #[derive(Component, Clone)]
 pub struct QuicConnectionConfig {
     pub client_config: ClientConfig,
@@ -30,16 +33,23 @@ pub struct QuicConnectionConfig {
     pub server_name: String,
 }
 
+/// When a connection changes to [`ConnectionStatus::Closed`] on a [`QuicEndpoint`] this component will be inserted with the reason.
 #[derive(Component, Deref)]
 pub struct QuicConnectionClosedReason(ConnectionError);
 
+/// When a connection changes to [`ConnectionStatus::Failed`] on a [`QuicEndpoint`] this component will be inserted with the reason.
 #[derive(Component, Deref)]
 pub struct QuicConnectionFailedReason(ConnectError);
 
-/// Holds the incoming connection. The incoming connection will be removed once it is used to accept or reject the connection.
+/// When a [`QuicEndpoint`] receives an incoming connection an entity with this component will be created.
+///
+/// Either despawn the entity to reject or insert a [`ConnectionOf`] pointing to [`Self::endpoint_entity`] to accept the connection.
 #[derive(Component)]
 pub struct IncomingQuicConnection {
     pub endpoint_entity: Entity,
+    /// Wrapped in an option so that ownership can be taken back by the endpoint to accept the connection.
+    ///
+    /// Should always be [`Some`] until the [`ConnectionOf`] is inserted.
     pub incoming: Option<Incoming>,
 }
 
@@ -255,6 +265,7 @@ pub(super) fn refuse_connections(
     Ok(())
 }
 
+/// An implementation of [`Transport`] using [`quinn_proto`].
 pub struct QuicEndpoint {
     endpoint: quinn_proto::Endpoint,
     connection_handles: HashMap<Entity, ConnectionHandle>,
