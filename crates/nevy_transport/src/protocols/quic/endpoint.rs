@@ -8,16 +8,17 @@ use std::{
 };
 
 use bevy::{platform::collections::HashMap, prelude::*};
+use bytes::Bytes;
 use log::{error, warn};
 use quinn_proto::{
-    ClientConfig, ConnectError, ConnectionError, ConnectionHandle, DatagramEvent, Incoming,
+    ClientConfig, ConnectError, ConnectionError, ConnectionHandle, DatagramEvent, Incoming, VarInt,
 };
 use quinn_udp::{UdpSockRef, UdpSocketState};
 
 use crate::{
     Connection, ConnectionOf, ConnectionStatus, Endpoint, Transport,
     protocols::quic::{
-        connection::{QuicConnectionContext, QuicConnectionState},
+        connection::{CloseFlagState, QuicConnectionContext, QuicConnectionState},
         udp_transmit,
     },
 };
@@ -120,7 +121,9 @@ pub(super) fn create_connections(
                         connection_entity,
                         connection,
                         stream_events: VecDeque::new(),
-                        close: None,
+                        close: CloseFlagState::None,
+                        datagrams_queue_offset: 0,
+                        datagrams: VecDeque::new(),
                     },
                 );
             }
@@ -168,7 +171,9 @@ pub(super) fn create_connections(
                 connection_entity,
                 connection,
                 stream_events: VecDeque::new(),
-                close: None,
+                close: CloseFlagState::None,
+                datagrams_queue_offset: 0,
+                datagrams: VecDeque::new(),
             },
         );
     }
@@ -450,10 +455,12 @@ impl QuicEndpoint {
 
     fn update_connections(&mut self, context: &mut EndpointUpdateContext) {
         for (&connection_handle, connection) in self.connections.iter_mut() {
-            if let Some((code, reason)) = connection.close.take() {
+            if let CloseFlagState::Sent = connection.close {
+                connection.close = CloseFlagState::Received;
+
                 connection
                     .connection
-                    .close(Instant::now(), code, reason.into());
+                    .close(Instant::now(), VarInt::from_u32(0), Bytes::new());
 
                 context
                     .commands

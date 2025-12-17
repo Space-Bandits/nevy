@@ -22,6 +22,7 @@ fn main() {
     app.run();
 }
 
+/// Spawns an endpoint that can accept connections.
 fn setup(mut commands: Commands) {
     commands.spawn(
         QuicEndpoint::new(
@@ -33,6 +34,7 @@ fn setup(mut commands: Commands) {
     );
 }
 
+/// Accepts quic connections.
 fn accept_connections(
     insert: On<Insert, IncomingQuicConnection>,
     mut commands: Commands,
@@ -49,6 +51,7 @@ fn accept_connections(
     Ok(())
 }
 
+/// Records data received on streams.
 #[derive(Component, Default, Deref, DerefMut)]
 struct ConnectionStreams(Vec<(Stream, Vec<u8>)>);
 
@@ -88,7 +91,7 @@ fn read_streams(
             closed_streams.push(loop {
                 match connection.read(stream)? {
                     Ok(chunk) => {
-                        info!("Received {} bytes", chunk.len());
+                        info!("Received {} bytes from {}", chunk.len(), connection_entity);
                         buffer.extend(chunk);
                     }
                     Err(StreamReadError::Blocked) => break true,
@@ -102,7 +105,11 @@ fn read_streams(
             let keep = closed_streams.next().unwrap_or(false);
 
             if !keep {
-                info!("Received message {:?}", str::from_utf8(buffer));
+                info!(
+                    "Received message {:?} from {}",
+                    str::from_utf8(buffer),
+                    connection_entity
+                );
             }
 
             keep
@@ -117,7 +124,10 @@ fn log_status_changes(
     status_q: Query<&ConnectionStatus>,
 ) -> Result {
     let status = status_q.get(insert.entity)?;
-    info!("Connection status changed to {:?}", status);
+    info!(
+        "Connection {} status changed to {:?}",
+        insert.entity, status
+    );
     Ok(())
 }
 

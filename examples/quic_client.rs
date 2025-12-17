@@ -16,11 +16,15 @@ fn main() {
 
     app.add_systems(Startup, setup);
     app.add_observer(log_status_changes);
-    app.add_systems(Update, write_messages);
+    app.add_systems(
+        Update,
+        ((write_messages, close_connections).chain(), exit_app),
+    );
 
     app.run();
 }
 
+/// Creates an endpoint and initiates a connection.
 fn setup(mut commands: Commands) {
     let endpoint_entity = commands
         .spawn(
@@ -38,6 +42,7 @@ fn setup(mut commands: Commands) {
     ));
 }
 
+/// Logs changes to the connection status
 fn log_status_changes(
     insert: On<Insert, ConnectionStatus>,
     status_q: Query<&ConnectionStatus>,
@@ -47,6 +52,7 @@ fn log_status_changes(
     Ok(())
 }
 
+/// When the connection establishes opens a stream, writes a message, and finishes the stream.
 fn write_messages(
     connection_q: Query<(Entity, &ConnectionOf, &ConnectionStatus), Changed<ConnectionStatus>>,
     mut endpoint_q: Query<&mut Endpoint>,
@@ -62,7 +68,7 @@ fn write_messages(
             .get_connection(connection_entity)
             .ok_or("Connection should exist")?;
 
-        let stream = connection.new_stream(StreamRequirements::RELIABLE)?;
+        let stream = connection.new_stream(StreamRequirements::UNRELIABLE)?;
 
         let written = connection.write(&stream, "Hello server!".as_bytes().into(), false)?;
 
@@ -72,6 +78,41 @@ fn write_messages(
     }
 
     Ok(())
+}
+
+/// Once all data has been transmitted, closes the connection.
+fn close_connections(
+    connection_q: Query<(Entity, &ConnectionOf, &ConnectionStatus)>,
+    mut endpoint_q: Query<&mut Endpoint>,
+) -> Result {
+    for (connection_entity, &ConnectionOf(endpoint_entity), status) in &connection_q {
+        let ConnectionStatus::Established = status else {
+            continue;
+        };
+
+        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
+
+        let mut connection = endpoint
+            .get_connection(connection_entity)
+            .ok_or("Connection should exist")?;
+
+        if connection.all_data_sent() {
+            connection.close();
+        }
+    }
+
+    Ok(())
+}
+
+/// Once the connection has closed, exits the app.
+fn exit_app(connection_q: Query<&ConnectionStatus>, mut exit_w: MessageWriter<AppExit>) {
+    for status in &connection_q {
+        let (ConnectionStatus::Closed | ConnectionStatus::Failed) = status else {
+            continue;
+        };
+
+        exit_w.write(AppExit::Success);
+    }
 }
 
 fn create_connection_config() -> quinn_proto::ClientConfig {

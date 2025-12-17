@@ -12,17 +12,29 @@ use crate::{
 };
 
 pub(crate) struct QuicConnectionState {
-    pub(crate) connection_entity: Entity,
-    pub(crate) connection: quinn_proto::Connection,
-    pub(crate) stream_events: VecDeque<StreamEvent>,
+    pub connection_entity: Entity,
+    pub connection: quinn_proto::Connection,
+    pub stream_events: VecDeque<StreamEvent>,
     /// signal to close the connection on the next update
-    pub(crate) close: Option<(VarInt, Box<[u8]>)>,
+    pub close: CloseFlagState,
+    pub datagrams_queue_offset: usize,
+    pub datagrams: VecDeque<Option<Bytes>>,
+}
+
+pub(crate) enum CloseFlagState {
+    None,
+    Sent,
+    Received,
 }
 
 #[derive(Clone, Copy)]
 pub enum QuicStreamId {
+    /// Stream id for sending datagrams on.
     Datagrams,
+    /// Quic stream id.
     Stream(quinn_proto::StreamId),
+    /// Each received datagram is considered a different stream.
+    ReceivedDatagram(usize),
 }
 
 impl StreamId for QuicStreamId {
@@ -145,17 +157,13 @@ impl<'a> ConnectionContext for QuicConnectionContext<'a> {
                 .connection
                 .send_stream(stream_id)
                 .write(data.as_ref())?,
+            QuicStreamId::ReceivedDatagram(_) => 0,
         })
     }
 
     fn read(&mut self, stream: &Stream) -> Result<Result<Bytes, StreamReadError>> {
-        Ok(match stream.as_stream::<QuicStreamId>()? {
-            QuicStreamId::Datagrams => self
-                .connection
-                .connection
-                .datagrams()
-                .recv()
-                .ok_or(StreamReadError::Blocked),
+        match stream.as_stream::<QuicStreamId>()? {
+            QuicStreamId::Datagrams => return Err(SendDatagramReadError.into()),
             &QuicStreamId::Stream(stream_id) => {
                 let mut stream = self.connection.connection.recv_stream(stream_id);
                 let mut chunks = match stream.read(true) {
@@ -166,13 +174,33 @@ impl<'a> ConnectionContext for QuicConnectionContext<'a> {
                     }
                 };
 
-                match chunks.next(usize::MAX) {
+                Ok(match chunks.next(usize::MAX) {
                     Ok(Some(chunk)) => Ok(chunk.bytes),
                     Err(ReadError::Blocked) => Err(StreamReadError::Blocked),
                     Err(ReadError::Reset(_)) | Ok(None) => Err(StreamReadError::Closed),
-                }
+                })
             }
-        })
+            QuicStreamId::ReceivedDatagram(index) => {
+                let Some(index) = index.checked_sub(self.connection.datagrams_queue_offset) else {
+                    return Ok(Err(StreamReadError::Closed));
+                };
+
+                let Some(datagram) = self.connection.datagrams.get_mut(index) else {
+                    return Err(
+                        "This datagram stream id was constructed with a higher index than should exist.".into()
+                    );
+                };
+
+                let result = datagram.take().ok_or(StreamReadError::Closed);
+
+                while let Some(None) = self.connection.datagrams.front() {
+                    self.connection.datagrams.pop_front();
+                    self.connection.datagrams_queue_offset += 1;
+                }
+
+                Ok(result)
+            }
+        }
     }
 
     fn close_send_stream(&mut self, stream: &Stream, graceful: bool) -> Result {
@@ -194,6 +222,7 @@ impl<'a> ConnectionContext for QuicConnectionContext<'a> {
                     }
                 }
             }
+            QuicStreamId::ReceivedDatagram(_) => (),
         };
 
         Ok(())
@@ -212,31 +241,61 @@ impl<'a> ConnectionContext for QuicConnectionContext<'a> {
                     warn!("Failed to stop quic stream {}: {}", stream_id, err);
                 }
             }
+            QuicStreamId::ReceivedDatagram(_) => (),
         };
 
         Ok(())
     }
 
     fn accept_stream(&mut self) -> Option<(Stream, StreamRequirements)> {
-        let (stream, bidirectional) = 's: {
+        let (stream, requirements) = 's: {
             if let Some(stream) = self.connection.connection.streams().accept(Dir::Uni) {
-                break 's (stream, false);
+                break 's (
+                    QuicStreamId::Stream(stream),
+                    StreamRequirements::RELIABLE_ORDERED,
+                );
             }
 
             if let Some(stream) = self.connection.connection.streams().accept(Dir::Bi) {
-                break 's (stream, true);
+                break 's (
+                    QuicStreamId::Stream(stream),
+                    StreamRequirements::RELIABLE_ORDERED.with_bidirectional(true),
+                );
+            }
+
+            if let Some(datagram) = self.connection.connection.datagrams().recv() {
+                let index =
+                    self.connection.datagrams_queue_offset + self.connection.datagrams.len();
+
+                self.connection.datagrams.push_back(Some(datagram));
+
+                break 's (
+                    QuicStreamId::ReceivedDatagram(index),
+                    StreamRequirements::UNRELIABLE,
+                );
             }
 
             return None;
         };
 
-        Some((
-            Stream::new(QuicStreamId::Stream(stream)),
-            StreamRequirements::RELIABLE_ORDERED.with_bidirectional(bidirectional),
-        ))
+        Some((Stream::new(stream), requirements))
+    }
+
+    fn close(&mut self) {
+        if let CloseFlagState::None = self.connection.close {
+            self.connection.close = CloseFlagState::Sent;
+        }
+    }
+
+    fn all_data_sent(&mut self) -> bool {
+        self.connection.connection.streams().send_streams() == 0
     }
 }
 
 #[derive(Error, Debug)]
-#[error("Quic streams in the desired direction are exhausted")]
+#[error("Quic streams in the desired direction are exhausted.")]
 pub struct ExaustedStreamsError;
+
+#[derive(Error, Debug)]
+#[error("This quic datagram stream is only for sending.")]
+pub struct SendDatagramReadError;

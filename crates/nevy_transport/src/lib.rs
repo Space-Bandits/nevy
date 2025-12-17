@@ -127,6 +127,14 @@ pub trait ConnectionContext {
     /// Also returns the requirements that the stream is guaranteed to meet.
     /// If it is bidirectional this means that it is also a send stream.
     fn accept_stream(&mut self) -> Option<(Stream, StreamRequirements)>;
+
+    /// Closes the connection.
+    ///
+    /// Calling multiple times does nothing.
+    fn close(&mut self);
+
+    /// Returns `true` when all reliable data on the connection has been sent.
+    fn all_data_sent(&mut self) -> bool;
 }
 
 /// An id for a stream on a connection that is either send, receive or both.
