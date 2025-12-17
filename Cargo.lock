@@ -3103,8 +3103,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nevy_messages"
+version = "0.3.0"
+dependencies = [
+ "bevy",
+ "log",
+ "nevy_transport",
+ "serde",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "nevy_transport"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "bytes",

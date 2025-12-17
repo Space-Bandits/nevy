@@ -1,0 +1,20 @@
+[package]
+name = "nevy_messages"
+version = "0.3.0"
+edition = "2024"
+categories = ["network-programming", "game-development"]
+description = ""
+keywords = ["netcode", "networking", "bevy"]
+license = "MIT OR Apache-2.0"
+readme = "readme.md"
+repository = "https://github.com/space-bandits/nevy"
+documentation = "https://docs.rs/nevy"
+
+[dependencies]
+bevy.workspace = true
+log.workspace = true
+
+nevy_transport.path = "../nevy_transport"
+
+serde = "1.0"
+thiserror = "2.0"
