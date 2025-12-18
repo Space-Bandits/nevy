@@ -5,6 +5,10 @@ use nevy_transport::prelude::*;
 
 use crate::protocol::MessageIdCount;
 
+// pub struct MessageReceiveStreams {
+//     streams: Vec<(Stream, MessageReceiveStreamState)>,
+// }
+
 #[derive(Component)]
 pub struct ReceivedSerializedMessages<P> {
     _p: PhantomData<P>,

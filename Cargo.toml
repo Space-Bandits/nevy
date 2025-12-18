@@ -11,10 +11,13 @@ repository = "https://github.com/space-bandits/nevy"
 documentation = "https://docs.rs/nevy"
 
 [features]
+default = ["quic", "messages"]
 quic = ["nevy_transport/quic"]
+messages = ["dep:nevy_messages"]
 
 [dependencies]
 nevy_transport.path = "crates/nevy_transport"
+nevy_messages = { path = "crates/nevy_messages", optional = true }
 
 [dev-dependencies]
 rustls = { version = "0.23.5", default-features = false, features = ["std"] }
