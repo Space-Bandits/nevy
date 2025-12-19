@@ -240,9 +240,9 @@ impl PartialEq for Stream {
 /// When you create a stream you are garunteed to have *at least* these requirements if the operation is a success.
 #[derive(Clone, Copy, Debug)]
 pub struct StreamRequirements {
-    reliable: bool,
-    ordered: bool,
-    bidirectional: bool,
+    pub reliable: bool,
+    pub ordered: bool,
+    pub bidirectional: bool,
 }
 
 impl StreamRequirements {

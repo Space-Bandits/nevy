@@ -7,7 +7,7 @@ use nevy_transport::prelude::*;
 #[derive(Component)]
 pub struct MessageStreamReaders {
     readers: Vec<(Stream, MessageStreamReaderState)>,
-    buffers: HashMap<usize, VecDeque<Box<[u8]>>>,
+    pub(crate) buffers: HashMap<usize, VecDeque<Box<[u8]>>>,
 }
 
 enum MessageStreamReaderState {

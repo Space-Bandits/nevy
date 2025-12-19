@@ -8,6 +8,7 @@ pub mod deserialize;
 pub mod protocol;
 pub mod reader;
 pub mod varint;
+pub mod writer;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum MessageSystems {
@@ -35,6 +36,8 @@ impl Default for NevyMessagesPlugin {
 
 impl Plugin for NevyMessagesPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(NevyMessagesSchedule(self.schedule));
+
         app.configure_sets(
             self.schedule,
             (
@@ -50,4 +53,11 @@ impl Plugin for NevyMessagesPlugin {
             reader::read_streams.in_set(MessageSystems::ReadStreams),
         );
     }
+}
+
+#[derive(Resource, Deref)]
+struct NevyMessagesSchedule(Interned<dyn ScheduleLabel>);
+
+pub fn bincode_config() -> bincode::config::Configuration {
+    bincode::config::standard()
 }

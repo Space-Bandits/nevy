@@ -1,12 +1,12 @@
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 
-#[derive(Serialize, Deserialize, Resource, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MessageId<P = ()> {
-    _p: PhantomData<P>,
-    id: usize,
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MessageId<T, P = ()> {
+    _p: PhantomData<(T, P)>,
+    pub(crate) id: usize,
 }
 
 pub struct MessageProtocol<I, P = ()> {
@@ -16,15 +16,20 @@ pub struct MessageProtocol<I, P = ()> {
 }
 
 trait BuildMessage<P> {
-    fn build_deserialize(&self, app: &mut App);
+    fn build(&self, app: &mut App, id: usize);
 }
 
 impl<T, P> BuildMessage<P> for PhantomData<T>
 where
-    T: Send + Sync + 'static,
+    T: Send + Sync + 'static + DeserializeOwned,
     P: Send + Sync + 'static,
 {
-    fn build_deserialize(&self, app: &mut App) {
+    fn build(&self, app: &mut App, id: usize) {
+        app.insert_resource(MessageId::<P> {
+            _p: PhantomData,
+            id,
+        });
+
         crate::deserialize::build_message::<T, P>(app);
     }
 }
@@ -33,7 +38,7 @@ impl<I, P> MessageProtocol<I, P> {
     pub fn add_message<T>(&mut self, id: I)
     where
         I: Ord,
-        T: Send + Sync + 'static,
+        T: Send + Sync + 'static + DeserializeOwned,
         P: Send + Sync + 'static,
     {
         let (Ok(index) | Err(index)) = self.messages.binary_search_by(|(probe, _)| probe.cmp(&id));
@@ -49,14 +54,9 @@ impl<I, P> MessageProtocol<I, P> {
         let mut id = 0;
 
         for (_, builder) in &self.messages {
-            app.insert_resource(MessageId::<P> {
-                _p: PhantomData,
-                id,
-            });
-
             id += 1;
 
-            builder.build_deserialize(app);
+            builder.build(app, id);
         }
 
         crate::deserialize::build::<P>(app);
