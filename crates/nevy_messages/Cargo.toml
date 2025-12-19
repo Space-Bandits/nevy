@@ -13,6 +13,7 @@ documentation = "https://docs.rs/nevy"
 [dependencies]
 bevy.workspace = true
 log.workspace = true
+bytes.workspace = true
 
 nevy_transport.path = "../nevy_transport"
 

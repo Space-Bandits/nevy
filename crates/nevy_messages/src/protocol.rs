@@ -9,13 +9,6 @@ pub struct MessageId<P = ()> {
     id: usize,
 }
 
-/// Stores how many different messages are in a particular protocol.
-#[derive(Resource)]
-pub(crate) struct MessageIdCount<P> {
-    _p: PhantomData<P>,
-    pub count: usize,
-}
-
 pub struct MessageProtocol<I, P = ()> {
     _p: PhantomData<P>,
     /// A sorted list of messages
@@ -65,11 +58,6 @@ impl<I, P> MessageProtocol<I, P> {
 
             builder.build_deserialize(app);
         }
-
-        app.insert_resource(MessageIdCount::<P> {
-            _p: PhantomData,
-            count: id,
-        });
 
         crate::deserialize::build::<P>(app);
     }

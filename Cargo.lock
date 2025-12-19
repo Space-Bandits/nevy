@@ -3129,6 +3129,7 @@ version = "0.3.0"
 dependencies = [
  "bevy",
  "bincode",
+ "bytes",
  "log",
  "nevy_transport",
  "serde",

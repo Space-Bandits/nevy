@@ -12,14 +12,14 @@ documentation = "https://docs.rs/nevy"
 
 [features]
 default = ["quic"]
-quic = ["dep:quinn-proto", "dep:quinn-udp", "dep:bytes"]
+quic = ["dep:quinn-proto", "dep:quinn-udp"]
 
 [dependencies]
 bevy.workspace = true
 log.workspace = true
+bytes.workspace = true
 
 thiserror = "2.0"
 
 quinn-proto = { version = "0.11.3", features = ["rustls"], optional = true }
 quinn-udp = { version = "0.5.14", optional = true }
-bytes = { version = "1.11", optional = true }

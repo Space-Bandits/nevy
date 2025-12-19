@@ -31,4 +31,4 @@ members = ["crates/*"]
 [workspace.dependencies]
 bevy = { version = "0.17", default-features = false }
 log = "0.4"
-# bincode = { version = "2.0", features = ["serde"], optional = true }
+bytes = { version = "1.11" }
