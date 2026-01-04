@@ -17,16 +17,17 @@ pub struct ReceiveProtocol<P = ()> {
     _p: PhantomData<P>,
 }
 
-#[derive(Component)]
-pub struct ReceivedMessages<T, P = ()> {
-    _p: PhantomData<P>,
-    messages: VecDeque<T>,
-}
-
 impl<P> Default for ReceiveProtocol<P> {
     fn default() -> Self {
         ReceiveProtocol { _p: PhantomData }
     }
+}
+
+#[derive(Component)]
+#[require(MessageStreamReaders)]
+pub struct ReceivedMessages<T, P = ()> {
+    _p: PhantomData<P>,
+    messages: VecDeque<T>,
 }
 
 impl<T, P> Default for ReceivedMessages<T, P> {

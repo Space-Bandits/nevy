@@ -10,7 +10,6 @@ pub struct MessageId<T, P = ()> {
 }
 
 pub struct MessageProtocol<I, P = ()> {
-    _p: PhantomData<P>,
     /// A sorted list of messages
     messages: Vec<(I, Box<dyn BuildMessage<P>>)>,
 }
@@ -51,11 +50,7 @@ impl<I, P> MessageProtocol<I, P> {
     where
         P: Send + Sync + 'static,
     {
-        let mut id = 0;
-
-        for (_, builder) in &self.messages {
-            id += 1;
-
+        for (id, (_, builder)) in self.messages.iter().enumerate() {
             builder.build(app, id);
         }
 

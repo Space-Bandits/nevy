@@ -1,4 +1,8 @@
-use bevy::prelude::*;
+use bevy::{
+    ecs::system::SystemParam,
+    platform::collections::{HashMap, hash_map::Entry},
+    prelude::*,
+};
 use bytes::Bytes;
 use nevy_transport::prelude::*;
 use serde::Serialize;
@@ -38,7 +42,7 @@ impl MessageStreamState {
     pub fn write<T, P>(
         &mut self,
         mut connection: Connection,
-        message_id: MessageId<P>,
+        message_id: MessageId<T, P>,
         message: &T,
     ) -> Result<bool>
     where
@@ -69,5 +73,117 @@ impl MessageStreamState {
         self.flush(connection)?;
 
         Ok(true)
+    }
+}
+
+#[derive(Default)]
+pub struct MessageSenderState {
+    streams: HashMap<Entity, MessageStreamState>,
+}
+
+#[derive(SystemParam)]
+pub struct MessageSenderParams<'w, 's> {
+    connection_q: Query<'w, 's, &'static ConnectionOf>,
+    endpoint_q: Query<'w, 's, &'static mut Endpoint>,
+}
+
+#[derive(SystemParam)]
+pub struct LocalMessageSender<'w, 's> {
+    state: Local<'s, MessageSenderState>,
+    params: MessageSenderParams<'w, 's>,
+}
+
+#[derive(Resource)]
+struct SharedMessageSenderState(MessageSenderState);
+
+#[derive(SystemParam)]
+pub struct SharedMessageSender<'w, 's> {
+    state: ResMut<'w, SharedMessageSenderState>,
+    params: MessageSenderParams<'w, 's>,
+}
+
+pub trait MessageSender<'a> {
+    fn context(
+        &'a mut self,
+    ) -> (
+        &'a mut MessageSenderState,
+        &'a mut MessageSenderParams<'a, 'a>,
+    );
+
+    fn flush(&'a mut self) -> Result {
+        let (state, params) = self.context();
+
+        let mut remove_streams = Vec::new();
+
+        for (&connection_entity, stream_state) in &mut state.streams {
+            let Ok(&ConnectionOf(endpoint_entity)) = params.connection_q.get(connection_entity)
+            else {
+                // If the connection no longer exists remove the stream.
+                remove_streams.push(connection_entity);
+                continue;
+            };
+
+            let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
+            let connection = endpoint.get_connection(connection_entity)?;
+
+            stream_state.flush(connection)?
+        }
+
+        for connection_entity in remove_streams {
+            state.streams.remove(&connection_entity);
+        }
+
+        Ok(())
+    }
+
+    fn write<T, P>(
+        &'a mut self,
+        connection_entity: Entity,
+        message_id: MessageId<T, P>,
+        message: &T,
+    ) -> Result<bool>
+    where
+        T: Serialize,
+    {
+        let (state, params) = self.context();
+
+        let &ConnectionOf(endpoint_entity) = params.connection_q.get(connection_entity)?;
+        let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
+        let mut connection = endpoint.get_connection(connection_entity)?;
+
+        let stream_state = match state.streams.entry(connection_entity) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(MessageStreamState::new(connection.reborrow())?),
+        };
+
+        stream_state.write(connection, message_id, message)
+    }
+}
+
+impl<'a, 'w, 's> MessageSender<'a> for LocalMessageSender<'w, 's>
+where
+    'a: 'w + 's,
+{
+    fn context(
+        &'a mut self,
+    ) -> (
+        &'a mut MessageSenderState,
+        &'a mut MessageSenderParams<'a, 'a>,
+    ) {
+        (&mut *self.state, &mut self.params)
+    }
+}
+
+impl<'a, 'w, 's> MessageSender<'a> for SharedMessageSender<'w, 's>
+where
+    'a: 'w + 's,
+{
+    fn context(
+        &'a mut self,
+    ) -> (
+        &'a mut MessageSenderState,
+        &'a mut MessageSenderParams<'a, 'a>,
+    ) {
+        (&mut self.state.0, &mut self.params)
     }
 }

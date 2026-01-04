@@ -123,7 +123,10 @@ pub trait Transport: Send + Sync {
     fn as_any<'a>(&'a mut self) -> &'a mut dyn Any;
 
     /// Gets the [`Connection`] of an [`Entity`] that is related to this [`Endpoint`] by a [`ConnectionOf`].
-    fn get_connection<'a>(&'a mut self, connection_entity: Entity) -> Option<Connection<'a>>;
+    fn get_connection<'a>(
+        &'a mut self,
+        connection_entity: Entity,
+    ) -> Result<Connection<'a>, NoConnectionError>;
 }
 
 #[derive(Deref, DerefMut)]
@@ -290,6 +293,10 @@ pub enum StreamReadError {
     /// The stream is closed and will never yield more data.
     Closed,
 }
+
+#[derive(Error, Debug)]
+#[error("This endpoint doesn't have a connection for this entity")]
+pub struct NoConnectionError;
 
 #[derive(Error, Debug)]
 #[error("Stream was for a different type of transport")]

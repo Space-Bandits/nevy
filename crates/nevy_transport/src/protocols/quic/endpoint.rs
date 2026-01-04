@@ -16,7 +16,7 @@ use quinn_proto::{
 use quinn_udp::{UdpSockRef, UdpSocketState};
 
 use crate::{
-    Connection, ConnectionOf, ConnectionStatus, Endpoint, Transport,
+    Connection, ConnectionOf, ConnectionStatus, Endpoint, NoConnectionError, Transport,
     protocols::quic::{
         connection::{CloseFlagState, QuicConnectionContext, QuicConnectionState},
         udp_transmit,
@@ -537,12 +537,18 @@ impl Transport for QuicEndpoint {
         self
     }
 
-    fn get_connection<'a>(&'a mut self, connection: Entity) -> Option<Connection<'a>> {
-        let handle = self.connection_handles.get(&connection)?;
+    fn get_connection<'a>(
+        &'a mut self,
+        connection: Entity,
+    ) -> Result<Connection<'a>, NoConnectionError> {
+        let handle = self
+            .connection_handles
+            .get(&connection)
+            .ok_or(NoConnectionError)?;
 
-        let connection = self.connections.get_mut(handle)?;
+        let connection = self.connections.get_mut(handle).ok_or(NoConnectionError)?;
 
-        Some(Connection(Box::new(QuicConnectionContext {
+        Ok(Connection(Box::new(QuicConnectionContext {
             connection,
             send_buffer: &mut self.send_buffer,
             max_datagrams: self.socket_state.gro_segments(),

@@ -2975,6 +2975,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "messages"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "nevy",
+ "rcgen",
+ "rustls",
+]
+
+[[package]]
 name = "metal"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

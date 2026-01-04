@@ -4,7 +4,7 @@ use crate::varint::*;
 use bevy::{platform::collections::HashMap, prelude::*};
 use nevy_transport::prelude::*;
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct MessageStreamReaders {
     readers: Vec<(Stream, MessageStreamReaderState)>,
     pub(crate) buffers: HashMap<usize, VecDeque<Box<[u8]>>>,
@@ -32,9 +32,7 @@ pub(crate) fn read_streams(
     for (connection_entity, &ConnectionOf(endpoint_entity), mut readers) in &mut connection_q {
         let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
 
-        let Some(mut connection) = endpoint.get_connection(connection_entity) else {
-            continue;
-        };
+        let mut connection = endpoint.get_connection(connection_entity)?;
 
         let mut keep = Vec::with_capacity(readers.readers.len());
 
