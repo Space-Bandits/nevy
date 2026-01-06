@@ -2,6 +2,7 @@ use bevy::{
     log::{Level, LogPlugin},
     prelude::*,
 };
+use messages::*;
 use nevy::prelude::*;
 
 fn main() {
@@ -12,14 +13,12 @@ fn main() {
         level: Level::DEBUG,
         ..default()
     });
-    app.add_plugins(QuicTransportPlugin::default());
+    app.add_plugins(NevyPlugins::default());
+    app.add_message_protocol(message_protocol());
 
     app.add_systems(Startup, setup);
     app.add_observer(log_status_changes);
-    app.add_systems(
-        Update,
-        ((write_messages, close_connections).chain(), exit_app),
-    );
+    app.add_systems(Update, send_messages);
 
     app.run();
 }
@@ -42,6 +41,32 @@ fn setup(mut commands: Commands) {
     ));
 }
 
+fn send_messages(
+    connection_q: Query<(Entity, &ConnectionStatus), Changed<ConnectionStatus>>,
+    mut sender: LocalMessageSender<false, true>,
+    message_id: Res<MessageId<HelloServer>>,
+) -> Result {
+    sender.flush()?;
+
+    for (connection_entity, status) in &connection_q {
+        let ConnectionStatus::Established = status else {
+            continue;
+        };
+
+        sender.write(
+            connection_entity,
+            *message_id,
+            &HelloServer {
+                data: "Hello Server!".into(),
+            },
+        )?;
+
+        info!("Wrote a message");
+    }
+
+    Ok(())
+}
+
 /// Logs changes to the connection status
 fn log_status_changes(
     insert: On<Insert, ConnectionStatus>,
@@ -50,69 +75,6 @@ fn log_status_changes(
     let status = status_q.get(insert.entity)?;
     info!("Connection status changed to {:?}", status);
     Ok(())
-}
-
-/// When the connection establishes opens a stream, writes a message, and finishes the stream.
-fn write_messages(
-    connection_q: Query<(Entity, &ConnectionOf, &ConnectionStatus), Changed<ConnectionStatus>>,
-    mut endpoint_q: Query<&mut Endpoint>,
-) -> Result {
-    for (connection_entity, &ConnectionOf(endpoint_entity), status) in &connection_q {
-        let ConnectionStatus::Established = status else {
-            continue;
-        };
-
-        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
-
-        let mut connection = endpoint
-            .get_connection(connection_entity)
-            .ok_or("Connection should exist")?;
-
-        let stream = connection.new_stream(StreamRequirements::UNRELIABLE)?;
-
-        let written = connection.write(&stream, "Hello server!".as_bytes().into(), false)?;
-
-        info!("Wrote {} bytes", written);
-
-        connection.close_send_stream(&stream, true)?;
-    }
-
-    Ok(())
-}
-
-/// Once all data has been transmitted, closes the connection.
-fn close_connections(
-    connection_q: Query<(Entity, &ConnectionOf, &ConnectionStatus)>,
-    mut endpoint_q: Query<&mut Endpoint>,
-) -> Result {
-    for (connection_entity, &ConnectionOf(endpoint_entity), status) in &connection_q {
-        let ConnectionStatus::Established = status else {
-            continue;
-        };
-
-        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
-
-        let mut connection = endpoint
-            .get_connection(connection_entity)
-            .ok_or("Connection should exist")?;
-
-        if connection.all_data_sent() {
-            connection.close();
-        }
-    }
-
-    Ok(())
-}
-
-/// Once the connection has closed, exits the app.
-fn exit_app(connection_q: Query<&ConnectionStatus>, mut exit_w: MessageWriter<AppExit>) {
-    for status in &connection_q {
-        let (ConnectionStatus::Closed | ConnectionStatus::Failed) = status else {
-            continue;
-        };
-
-        exit_w.write(AppExit::Success);
-    }
 }
 
 fn create_connection_config() -> quinn_proto::ClientConfig {

@@ -25,28 +25,21 @@ impl<P> Default for ReceiveProtocol<P> {
 
 #[derive(Component)]
 #[require(MessageStreamReaders)]
-pub struct ReceivedMessages<T, P = ()> {
-    _p: PhantomData<P>,
+pub struct ReceivedMessages<T> {
     messages: VecDeque<T>,
 }
 
-impl<T, P> Default for ReceivedMessages<T, P> {
+impl<T> Default for ReceivedMessages<T> {
     fn default() -> Self {
         ReceivedMessages {
-            _p: PhantomData,
             messages: VecDeque::new(),
         }
     }
 }
 
-#[derive(Component)]
-pub struct AddReceivedMessages<P = ()> {
-    _p: PhantomData<P>,
-}
-
-impl<P> Default for AddReceivedMessages<P> {
-    fn default() -> Self {
-        AddReceivedMessages { _p: PhantomData }
+impl<T> ReceivedMessages<T> {
+    pub fn drain(&mut self) -> impl Iterator<Item = T> {
+        self.messages.drain(..)
     }
 }
 
@@ -108,14 +101,17 @@ where
     if connection_q.contains(insert.entity) {
         commands
             .entity(insert.entity)
-            .insert(ReceivedMessages::<T, P>::default());
+            .insert(ReceivedMessages::<T>::default());
     }
 
     Ok(())
 }
 
 fn deserialize_messages<T, P>(
-    mut connection_q: Query<(&mut MessageStreamReaders, &mut ReceivedMessages<T, P>)>,
+    mut connection_q: Query<
+        (&mut MessageStreamReaders, &mut ReceivedMessages<T>),
+        With<ReceiveProtocol<P>>,
+    >,
     message_id: Res<MessageId<T, P>>,
 ) where
     T: Send + Sync + 'static + DeserializeOwned,

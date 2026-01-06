@@ -143,6 +143,10 @@ pub trait ConnectionContext {
     /// Attempts to write a piece of data to a stream.
     ///
     /// If successful, the number of bytes written is returned.
+    /// This method will accept partial writes of the data chunk given only if the stream is ordered and reliable.
+    /// If the stream was either unreliable or unordered
+    /// then partial writes would allow part of the chunk to be dropped,
+    /// or the chunk to arrive out of order or with other data inserted inbetween.
     ///
     /// `block` determines what happens when the stream is congested.
     /// If `block` is set to false then bytes may be accepted and `Ok(1..)` values will be returned,

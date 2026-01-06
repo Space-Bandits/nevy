@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use bevy::{
     ecs::system::SystemParam,
     platform::collections::{HashMap, hash_map::Entry},
@@ -15,8 +17,8 @@ pub struct MessageStreamState {
 }
 
 impl MessageStreamState {
-    pub fn new(mut connection: Connection) -> Result<Self> {
-        let stream = connection.new_stream(StreamRequirements::RELIABLE_ORDERED)?;
+    pub fn new(mut connection: Connection, requirements: StreamRequirements) -> Result<Self> {
+        let stream = connection.new_stream(requirements)?;
 
         Ok(MessageStreamState {
             stream,
@@ -87,31 +89,52 @@ pub struct MessageSenderParams<'w, 's> {
     endpoint_q: Query<'w, 's, &'static mut Endpoint>,
 }
 
+/*
+*
+* struct Streams(Vec<(MessageStreamState)>)
+*
+* fn my_func(sender: MessageSender) {
+*  sender.send(stream, message);
+}
+*/
+
 #[derive(SystemParam)]
-pub struct LocalMessageSender<'w, 's> {
+pub struct LocalMessageSender<'w, 's, const RELIABLE: bool = true, const ORDERED: bool = true> {
     state: Local<'s, MessageSenderState>,
     params: MessageSenderParams<'w, 's>,
 }
 
+pub type LocalMessageSenderUnrel<'w, 's> = LocalMessageSender<'w, 's, true, false>;
+pub type LocalMessageSenderUnord<'w, 's> = LocalMessageSender<'w, 's, false, true>;
+pub type LocalMessageSenderUnordUnrel<'w, 's> = LocalMessageSender<'w, 's, false, false>;
+
 #[derive(Resource)]
-struct SharedMessageSenderState(MessageSenderState);
+struct SharedMessageSenderState<S> {
+    _p: PhantomData<S>,
+    requirements: StreamRequirements,
+    state: MessageSenderState,
+}
 
 #[derive(SystemParam)]
-pub struct SharedMessageSender<'w, 's> {
-    state: ResMut<'w, SharedMessageSenderState>,
+pub struct SharedMessageSender<'w, 's, S>
+where
+    S: Send + Sync + 'static,
+{
+    state: ResMut<'w, SharedMessageSenderState<S>>,
     params: MessageSenderParams<'w, 's>,
 }
 
-pub trait MessageSender<'a> {
+pub trait MessageSender<'w, 's> {
     fn context(
-        &'a mut self,
+        &mut self,
     ) -> (
-        &'a mut MessageSenderState,
-        &'a mut MessageSenderParams<'a, 'a>,
+        &mut MessageSenderState,
+        &mut MessageSenderParams<'w, 's>,
+        StreamRequirements,
     );
 
-    fn flush(&'a mut self) -> Result {
-        let (state, params) = self.context();
+    fn flush(&mut self) -> Result {
+        let (state, params, _) = self.context();
 
         let mut remove_streams = Vec::new();
 
@@ -137,7 +160,7 @@ pub trait MessageSender<'a> {
     }
 
     fn write<T, P>(
-        &'a mut self,
+        &mut self,
         connection_entity: Entity,
         message_id: MessageId<T, P>,
         message: &T,
@@ -145,7 +168,7 @@ pub trait MessageSender<'a> {
     where
         T: Serialize,
     {
-        let (state, params) = self.context();
+        let (state, params, requirements) = self.context();
 
         let &ConnectionOf(endpoint_entity) = params.connection_q.get(connection_entity)?;
         let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
@@ -153,37 +176,69 @@ pub trait MessageSender<'a> {
 
         let stream_state = match state.streams.entry(connection_entity) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => entry.insert(MessageStreamState::new(connection.reborrow())?),
+            Entry::Vacant(entry) => entry.insert(MessageStreamState::new(
+                connection.reborrow(),
+                requirements,
+            )?),
         };
 
         stream_state.write(connection, message_id, message)
     }
 }
 
-impl<'a, 'w, 's> MessageSender<'a> for LocalMessageSender<'w, 's>
-where
-    'a: 'w + 's,
+impl<'w, 's, const RELIABLE: bool, const ORDERED: bool> MessageSender<'w, 's>
+    for LocalMessageSender<'w, 's, RELIABLE, ORDERED>
 {
     fn context(
-        &'a mut self,
+        &mut self,
     ) -> (
-        &'a mut MessageSenderState,
-        &'a mut MessageSenderParams<'a, 'a>,
+        &mut MessageSenderState,
+        &mut MessageSenderParams<'w, 's>,
+        StreamRequirements,
     ) {
-        (&mut *self.state, &mut self.params)
+        let requirements = StreamRequirements {
+            reliable: RELIABLE,
+            ordered: ORDERED,
+            bidirectional: false,
+        };
+
+        (&mut *self.state, &mut self.params, requirements)
     }
 }
 
-impl<'a, 'w, 's> MessageSender<'a> for SharedMessageSender<'w, 's>
+impl<'w, 's, S> MessageSender<'w, 's> for SharedMessageSender<'w, 's, S>
 where
-    'a: 'w + 's,
+    S: Send + Sync + 'static,
 {
     fn context(
-        &'a mut self,
+        &mut self,
     ) -> (
-        &'a mut MessageSenderState,
-        &'a mut MessageSenderParams<'a, 'a>,
+        &mut MessageSenderState,
+        &mut MessageSenderParams<'w, 's>,
+        StreamRequirements,
     ) {
-        (&mut self.state.0, &mut self.params)
+        let requirements = self.state.requirements;
+
+        (&mut self.state.state, &mut self.params, requirements)
+    }
+}
+
+pub trait AddSharedMessageSender {
+    fn add_shared_message_sender<S>(&mut self, requirements: StreamRequirements)
+    where
+        S: Send + Sync + 'static;
+}
+
+impl AddSharedMessageSender for App {
+    /// Inserts the shared state for a [`SharedMessageSender<S>`].
+    fn add_shared_message_sender<S>(&mut self, requirements: StreamRequirements)
+    where
+        S: Send + Sync + 'static,
+    {
+        self.insert_resource(SharedMessageSenderState::<S> {
+            _p: PhantomData,
+            requirements: requirements.with_ordered(true),
+            state: MessageSenderState::default(),
+        });
     }
 }

@@ -25,6 +25,29 @@ enum MessageStreamReaderState {
     },
 }
 
+pub(crate) fn accept_streams(
+    mut connection_q: Query<(Entity, &ConnectionOf, &mut MessageStreamReaders)>,
+    mut endpoint_q: Query<&mut Endpoint>,
+) -> Result {
+    for (connection_entity, &ConnectionOf(endpoint_entity), mut readers) in &mut connection_q {
+        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
+        let mut connection = endpoint.get_connection(connection_entity)?;
+
+        while let Some((stream, _)) = connection.accept_stream() {
+            debug!("Accepted a stream");
+
+            readers.readers.push((
+                stream,
+                MessageStreamReaderState::ReceivingId {
+                    decoder: VarIntDecoder::default(),
+                },
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) fn read_streams(
     mut connection_q: Query<(Entity, &ConnectionOf, &mut MessageStreamReaders)>,
     mut endpoint_q: Query<&mut Endpoint>,
@@ -84,7 +107,7 @@ pub(crate) fn read_streams(
                             ref mut buffer,
                         } => {
                             // take data from chunk
-                            let remaining_bytes = buffer.len() - length;
+                            let remaining_bytes = length - buffer.len();
                             buffer
                                 .extend(chunk.split_to(remaining_bytes.min(chunk.len())).as_ref());
 

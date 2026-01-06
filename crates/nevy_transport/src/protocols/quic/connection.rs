@@ -3,7 +3,7 @@ use std::{collections::VecDeque, net::UdpSocket};
 use bevy::prelude::*;
 use bytes::Bytes;
 use log::warn;
-use quinn_proto::{Dir, ReadError, ReadableError, StreamEvent, VarInt};
+use quinn_proto::{Dir, ReadError, ReadableError, SendDatagramError, StreamEvent, VarInt};
 use quinn_udp::UdpSocketState;
 use thiserror::Error;
 
@@ -148,14 +148,11 @@ impl<'a> ConnectionContext for QuicConnectionContext<'a> {
             QuicStreamId::Datagrams => {
                 let len = data.len();
 
-                self.connection
-                    .connection
-                    .datagrams()
-                    .send(data, !block)
-                    .map_err(|err| BevyError::from(err))?;
-
-                // either all bytes were written or none were
-                len
+                match self.connection.connection.datagrams().send(data, !block) {
+                    Ok(()) => len,
+                    Err(SendDatagramError::Blocked(_)) => 0,
+                    Err(err) => return Err(err.into()),
+                }
             }
             &QuicStreamId::Stream(stream_id) => self
                 .connection

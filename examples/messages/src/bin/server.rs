@@ -2,6 +2,7 @@ use bevy::{
     log::{Level, LogPlugin},
     prelude::*,
 };
+use messages::*;
 use nevy::prelude::*;
 
 fn main() {
@@ -12,26 +13,28 @@ fn main() {
         level: Level::DEBUG,
         ..default()
     });
-    app.add_plugins(QuicTransportPlugin::default());
+    app.add_plugins(NevyPlugins::default());
+    app.add_message_protocol(message_protocol());
 
     app.add_systems(Startup, setup);
     app.add_observer(accept_connections);
     app.add_observer(log_status_changes);
-    app.add_systems(Update, (accept_streams, read_streams));
+    app.add_systems(Update, read_messages);
 
     app.run();
 }
 
 /// Spawns an endpoint that can accept connections.
 fn setup(mut commands: Commands) {
-    commands.spawn(
+    commands.spawn((
+        ReceiveProtocol::<()>::default(),
         QuicEndpoint::new(
             "0.0.0.0:27518",
             quinn_proto::EndpointConfig::default(),
             Some(create_server_endpoint_config()),
         )
         .unwrap(),
-    );
+    ));
 }
 
 /// Accepts quic connections.
@@ -46,77 +49,17 @@ fn accept_connections(
 
     commands
         .entity(insert.entity)
-        .insert((ConnectionOf(endpoint_entity), ConnectionStreams::default()));
+        .insert(ConnectionOf(endpoint_entity));
 
     Ok(())
 }
 
-/// Records data received on streams.
-#[derive(Component, Default, Deref, DerefMut)]
-struct ConnectionStreams(Vec<(Stream, Vec<u8>)>);
-
-fn accept_streams(
-    mut connection_q: Query<(Entity, &ConnectionOf, &mut ConnectionStreams)>,
-    mut endpoint_q: Query<&mut Endpoint>,
-) -> Result {
-    for (connection_entity, &ConnectionOf(endpoint_entity), mut streams) in &mut connection_q {
-        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
-
-        let mut connection = endpoint
-            .get_connection(connection_entity)
-            .ok_or("Connection should exist")?;
-
-        while let Some((stream, _)) = connection.accept_stream() {
-            streams.push((stream, Vec::new()));
+fn read_messages(mut connection_q: Query<&mut ReceivedMessages<HelloServer>>) {
+    for mut messages in &mut connection_q {
+        for HelloServer { data } in messages.drain() {
+            info!("Received message: {}", data);
         }
     }
-
-    Ok(())
-}
-
-fn read_streams(
-    mut connection_q: Query<(Entity, &ConnectionOf, &mut ConnectionStreams)>,
-    mut endpoint_q: Query<&mut Endpoint>,
-) -> Result {
-    for (connection_entity, &ConnectionOf(endpoint_entity), mut streams) in &mut connection_q {
-        let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
-
-        let mut connection = endpoint
-            .get_connection(connection_entity)
-            .ok_or("Connection should exist")?;
-
-        let mut closed_streams = Vec::with_capacity(streams.len());
-
-        for &mut (ref stream, ref mut buffer) in streams.iter_mut() {
-            closed_streams.push(loop {
-                match connection.read(stream)? {
-                    Ok(chunk) => {
-                        info!("Received {} bytes from {}", chunk.len(), connection_entity);
-                        buffer.extend(chunk);
-                    }
-                    Err(StreamReadError::Blocked) => break true,
-                    Err(StreamReadError::Closed) => break false,
-                }
-            });
-        }
-
-        let mut closed_streams = closed_streams.into_iter();
-        streams.retain(|(_, buffer)| {
-            let keep = closed_streams.next().unwrap_or(false);
-
-            if !keep {
-                info!(
-                    "Received message {:?} from {}",
-                    str::from_utf8(buffer),
-                    connection_entity
-                );
-            }
-
-            keep
-        });
-    }
-
-    Ok(())
 }
 
 fn log_status_changes(

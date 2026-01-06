@@ -5,6 +5,7 @@ use bevy::{
 use nevy_transport::{DEFAULT_TRANSPORT_SCHEDULE, TransportUpdateSystems};
 
 pub mod deserialize;
+pub mod prelude;
 pub mod protocol;
 pub mod reader;
 pub mod varint;
@@ -50,7 +51,9 @@ impl Plugin for NevyMessagesPlugin {
 
         app.add_systems(
             self.schedule,
-            reader::read_streams.in_set(MessageSystems::ReadStreams),
+            (reader::accept_streams, reader::read_streams)
+                .chain()
+                .in_set(MessageSystems::ReadStreams),
         );
     }
 }
