@@ -159,7 +159,7 @@ pub trait MessageSender<'w, 's> {
         Ok(())
     }
 
-    fn write<T, P>(
+    fn write<P, T>(
         &mut self,
         connection_entity: Entity,
         message_id: MessageId<T, P>,

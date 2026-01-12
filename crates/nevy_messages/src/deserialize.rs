@@ -5,9 +5,7 @@ use log::{debug, warn};
 use nevy_transport::prelude::*;
 use serde::de::DeserializeOwned;
 
-use crate::{
-    MessageSystems, NevyMessagesSchedule, protocol::MessageId, reader::MessageStreamReaders,
-};
+use crate::{MessageSystems, NevyMessagesSchedule, reader::MessageStreamReaders};
 
 /// Can be inserted onto either a connection entity directly,
 /// or onto an endpoint which which will insert it onto

@@ -43,7 +43,7 @@ fn setup(mut commands: Commands) {
 
 fn send_messages(
     connection_q: Query<(Entity, &ConnectionStatus), Changed<ConnectionStatus>>,
-    mut sender: LocalMessageSender<false, true>,
+    mut sender: LocalMessageSenderUnord,
     message_id: Res<MessageId<HelloServer>>,
 ) -> Result {
     sender.flush()?;

@@ -1,133 +1,53 @@
-use std::marker::PhantomData;
+use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    marker::PhantomData,
+};
 
 use bevy::prelude::*;
-use serde::de::DeserializeOwned;
 
-#[derive(Resource, Debug, PartialEq, Eq, Hash)]
-pub struct MessageId<T, P = ()> {
-    _p: PhantomData<(T, P)>,
-    pub(crate) id: usize,
+#[derive(Component)]
+#[require(Protocol)]
+struct ProtocolMarker<P>(PhantomData<P>);
+
+#[derive(Component, Default)]
+struct Protocol {
+    messages: Vec<Box<dyn MessageId>>,
+    lookup: HashMap<Box<dyn MessageId>, usize>,
 }
 
-impl<T, P> Clone for MessageId<T, P> {
-    fn clone(&self) -> Self {
-        MessageId {
-            _p: PhantomData,
-            id: self.id,
-        }
+trait MessageId: Send + Sync + 'static {
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<Self>()
     }
 }
 
-impl<T, P> Copy for MessageId<T, P> {}
+impl<T> MessageId for PhantomData<T> where T: Send + Sync + 'static {}
 
-pub struct MessageProtocol<I, P = ()> {
-    /// A sorted list of messages
-    messages: Vec<(I, Box<dyn BuildMessage<P>>)>,
-}
-
-trait BuildMessage<P> {
-    fn build(&self, app: &mut App, id: usize);
-}
-
-impl<T, P> BuildMessage<P> for PhantomData<T>
-where
-    T: Send + Sync + 'static + DeserializeOwned,
-    P: Send + Sync + 'static,
-{
-    fn build(&self, app: &mut App, id: usize) {
-        app.insert_resource(MessageId::<T> {
-            _p: PhantomData,
-            id,
-        });
-
-        crate::deserialize::build_message::<T, P>(app);
+impl Hash for Box<dyn MessageId> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_id().hash(state);
     }
 }
 
-impl<I, P> MessageProtocol<I, P> {
-    pub fn new() -> Self {
-        MessageProtocol {
-            messages: Vec::new(),
-        }
-    }
-
-    pub fn add_message<T>(&mut self, id: I)
-    where
-        I: Ord,
-        T: Send + Sync + 'static + DeserializeOwned,
-        P: Send + Sync + 'static,
-    {
-        let (Ok(index) | Err(index)) = self.messages.binary_search_by(|(probe, _)| probe.cmp(&id));
-
-        self.messages
-            .insert(index, (id, Box::new(PhantomData::<T>)));
-    }
-
-    pub fn with_message<T>(mut self, id: I) -> Self
-    where
-        I: Ord,
-        T: Send + Sync + 'static + DeserializeOwned,
-        P: Send + Sync + 'static,
-    {
-        self.add_message::<T>(id);
-        self
-    }
-
-    pub fn add_to_app(&self, app: &mut App)
-    where
-        P: Send + Sync + 'static,
-    {
-        for (id, (_, builder)) in self.messages.iter().enumerate() {
-            builder.build(app, id);
-        }
-
-        crate::deserialize::build::<P>(app);
+impl PartialEq for Box<dyn MessageId> {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_id() == other.type_id()
     }
 }
 
-pub trait AddMessageProtocol {
-    fn add_message_protocol<I, P>(&mut self, protocol: MessageProtocol<I, P>) -> &mut Self
+pub trait ProtocolBuilder {
+    fn init_protocol<P>(&mut self)
     where
         P: Send + Sync + 'static;
 }
 
-impl AddMessageProtocol for App {
-    fn add_message_protocol<I, P>(&mut self, protocol: MessageProtocol<I, P>) -> &mut Self
+impl ProtocolBuilder for App {
+    fn init_protocol<P>(&mut self)
     where
         P: Send + Sync + 'static,
     {
-        protocol.add_to_app(self);
-
-        self
+        self.world_mut().spawn(ProtocolMarker::<P>(PhantomData));
     }
-}
-
-#[macro_export]
-macro_rules! ordered_protocol {
-    (
-        marker = $marker:ty,
-        $($message:ty),*$(,)?
-    ) => {
-        {
-            let mut id = 0;
-
-            MessageProtocol::<usize, $marker>::new()
-
-            $(
-                .with_message::<$message>({
-                    id += 1;
-                    id
-                })
-            )*
-        }
-    };
-
-    (
-        $($message:ty),*$(,)?
-    ) => {
-        ordered_protocol!(
-            marker = (),
-            $($message),*
-        )
-    };
 }
