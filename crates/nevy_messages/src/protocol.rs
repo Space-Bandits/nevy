@@ -41,15 +41,29 @@ impl<P> Default for ConnectionProtocol<P> {
 pub(crate) struct ConnectionProtocolEntity(Entity);
 
 pub trait ProtocolBuilder {
+    /// Initializes a new protocol `P`.
     fn init_protocol<P>(&mut self)
     where
         P: Send + Sync + 'static;
 
+    /// Adds a message to a protocol, assigning it a numerical id.
+    ///
+    /// The order that messages are added to the protocol is what defines the protocol.
+    /// Messages must be added in the same order on the client and the server.
+    /// For this reason it is best to add all your messages in a common plugin or build function.
     fn add_protocol_message<P, T>(&mut self)
     where
         P: Send + Sync + 'static,
         T: Send + Sync + 'static + DeserializeOwned;
 
+    /// Adds all the methods from one protocol `O` to to another protocol `P`.
+    ///
+    /// This is used when third party plugins need to add messages to your messaging protocol.
+    /// When you add a plugin that creates a protocol you can then call this method to include its messages.
+    ///
+    /// Just like in [`add_protocol_message`](ProtocolBuilder::add_protocol_message),
+    /// the order you include other protocols and add individual messages is what defines the protocol
+    /// and must be the same on the client and the server.
     fn include_protocol<P, O>(&mut self)
     where
         P: Send + Sync + 'static,
@@ -61,6 +75,13 @@ impl ProtocolBuilder for App {
     where
         P: Send + Sync + 'static,
     {
+        if self.world().contains_resource::<ProtocolEntity<P>>() {
+            panic!(
+                "Tried to initialize protocol `{}` twice",
+                std::any::type_name::<P>()
+            );
+        }
+
         let protocol_entity = self.world_mut().spawn(Protocol::default()).id();
 
         self.insert_resource(ProtocolEntity::<P> {
@@ -88,6 +109,10 @@ impl ProtocolBuilder for App {
             .world_mut()
             .get_mut::<Protocol>(protocol_entity)
             .unwrap();
+
+        if protocol.lookup.contains_key(&TypeId::of::<T>()) {
+            panic!("This protocol already has this message assigned");
+        }
 
         let id = protocol.messages.len();
         protocol.messages.push(TypeId::of::<T>());
@@ -129,6 +154,10 @@ impl ProtocolBuilder for App {
             .unwrap();
 
         for message in messages {
+            if protocol.lookup.contains_key(&message) {
+                continue;
+            }
+
             let id = protocol.messages.len();
             protocol.messages.push(message);
             protocol.lookup.insert(message, id);

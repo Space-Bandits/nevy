@@ -56,6 +56,7 @@ fn send_messages(
 
         sender.write(
             connection_entity,
+            true,
             &HelloServer {
                 data: "Hello Server!".into(),
             },

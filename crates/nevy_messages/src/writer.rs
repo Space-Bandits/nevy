@@ -1,4 +1,4 @@
-use std::{any::TypeId, marker::PhantomData};
+use std::{any::TypeId, collections::VecDeque, marker::PhantomData};
 
 use bevy::{
     ecs::system::SystemParam,
@@ -14,9 +14,14 @@ use crate::{
     varint::VarInt,
 };
 
+/// A state machine for a stream that sends messages.
+///
+/// For most use cases that involve sending messages use either [`LocalMessageSender`] or [`SharedMessageSender`].
 pub struct MessageStreamState {
     stream: Stream,
-    buffer: Option<Bytes>,
+    /// Each chunk of data must be sent entirely.
+    /// This is why they are kept separately.
+    buffer: VecDeque<Bytes>,
 }
 
 impl MessageStreamState {
@@ -25,43 +30,46 @@ impl MessageStreamState {
 
         Ok(MessageStreamState {
             stream,
-            buffer: None,
+            buffer: VecDeque::new(),
         })
     }
 
-    pub fn flush(&mut self, mut connection: Connection) -> Result {
-        let Some(bytes) = self.buffer.as_mut() else {
-            return Ok(());
-        };
+    /// Writes as much data as possible, returns `true` if all data was written.
+    pub fn flush(&mut self, mut connection: Connection) -> Result<bool> {
+        while let Some(message) = self.buffer.front_mut() {
+            let written = connection.write(&self.stream, message.clone(), true)?;
+            let _ = message.split_to(written);
 
-        let written = connection.write(&self.stream, bytes.clone(), true)?;
-        let _ = bytes.split_to(written);
-
-        if bytes.is_empty() {
-            self.buffer = None;
+            if message.is_empty() {
+                self.buffer.pop_front();
+            } else {
+                return Ok(false);
+            }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     pub fn write<T>(
         &mut self,
         mut connection: Connection,
         message_id: usize,
+        queue: bool,
         message: &T,
     ) -> Result<bool>
     where
         T: Serialize,
     {
-        self.flush(connection.reborrow())?;
+        let buffer_empty = self.flush(connection.reborrow())?;
 
-        if self.buffer.is_some() {
+        // Only attempt to send the message if there is no congestion or if `queue` is true.
+        if !(queue || buffer_empty) {
             return Ok(false);
         }
 
         let message = bincode::serde::encode_to_vec(message, crate::bincode_config())?;
 
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(message.len() + 16);
 
         VarInt::from_u64(message_id as u64)
             .ok_or("Message id was too big for VarInt")?
@@ -73,19 +81,26 @@ impl MessageStreamState {
 
         buffer.extend(message);
 
-        self.buffer = Some(buffer.into());
+        self.buffer.push_back(buffer.into());
 
         self.flush(connection)?;
 
         Ok(true)
     }
+
+    pub fn close(&mut self, mut connection: Connection, graceful: bool) -> Result {
+        connection.close_send_stream(&self.stream, graceful)
+    }
 }
 
+/// Holds an optional [`MessageStreamState`] for each connection.
+/// Used by either a [`LocalMessageSender`] or [`SharedMessageSender`] for sending messages from systems.
 #[derive(Default)]
 pub struct MessageSenderState {
     streams: HashMap<Entity, MessageStreamState>,
 }
 
+/// System parameters needed for either a [`LocalMessageSender`] or [`SharedMessageSender`] to send messages.
 #[derive(SystemParam)]
 pub struct MessageSenderParams<'w, 's> {
     connection_q: Query<'w, 's, (&'static ConnectionOf, &'static ConnectionProtocolEntity)>,
@@ -93,15 +108,16 @@ pub struct MessageSenderParams<'w, 's> {
     protocol_q: Query<'w, 's, &'static Protocol>,
 }
 
-/*
-*
-* struct Streams(Vec<(MessageStreamState)>)
-*
-* fn my_func(sender: MessageSender) {
-*  sender.send(stream, message);
-}
-*/
-
+/// Holds a [`MessageSenderState`] in a system [`Local`].
+/// Used for sending messages when ordering requirements between systems aren't needed.
+///
+/// [`Self::flush`](MessageSender::flush) needs to be called in any system that uses this sender,
+/// or partially written messages will not be sent.
+///
+/// By default this sender is reliable and ordered. There are shorthands for less strict [`StreamRequirements`].
+/// - [`LocalMessageSenderUnrel`]
+/// - [`LocalMessageSenderUnord`]
+/// - [`LocalMessageSenderUnordUnrel`]
 #[derive(SystemParam)]
 pub struct LocalMessageSender<'w, 's, const RELIABLE: bool = true, const ORDERED: bool = true> {
     state: Local<'s, MessageSenderState>,
@@ -112,13 +128,16 @@ pub type LocalMessageSenderUnrel<'w, 's> = LocalMessageSender<'w, 's, true, fals
 pub type LocalMessageSenderUnord<'w, 's> = LocalMessageSender<'w, 's, false, true>;
 pub type LocalMessageSenderUnordUnrel<'w, 's> = LocalMessageSender<'w, 's, false, false>;
 
-#[derive(Resource)]
-struct SharedMessageSenderState<S> {
-    _p: PhantomData<S>,
-    requirements: StreamRequirements,
-    state: MessageSenderState,
-}
-
+/// Holds a [`MessageSenderState`] in a shared resource.
+/// Used for sending messages when ordering requirements between systems are needed.
+///
+/// Unlike a [`LocalMessageSender`] the shared state needs to be initialized by calling
+/// [`App::add_shared_message_sender<S>`](AddSharedMessageSender::add_shared_message_sender)
+/// with the desired [`StreamRequirements`].
+///
+/// Each shared sender is marked by a unique `S`.
+///
+/// [`Self::flush`](MessageSender::flush) does not need to be called manually for shared senders, it is done automatically once per tick.
 #[derive(SystemParam)]
 pub struct SharedMessageSender<'w, 's, S>
 where
@@ -126,6 +145,14 @@ where
 {
     state: ResMut<'w, SharedMessageSenderState<S>>,
     params: MessageSenderParams<'w, 's>,
+}
+
+/// The shared state used by a [`SharedMessageSender`].
+#[derive(Resource)]
+struct SharedMessageSenderState<S> {
+    _p: PhantomData<S>,
+    requirements: StreamRequirements,
+    state: MessageSenderState,
 }
 
 pub trait MessageSender<'w, 's> {
@@ -137,6 +164,7 @@ pub trait MessageSender<'w, 's> {
         StreamRequirements,
     );
 
+    /// Attempts to flush any partially written messages.
     fn flush(&mut self) -> Result {
         let (state, params, _) = self.context();
 
@@ -154,7 +182,7 @@ pub trait MessageSender<'w, 's> {
             let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
             let connection = endpoint.get_connection(connection_entity)?;
 
-            stream_state.flush(connection)?
+            stream_state.flush(connection)?;
         }
 
         for connection_entity in remove_streams {
@@ -164,7 +192,11 @@ pub trait MessageSender<'w, 's> {
         Ok(())
     }
 
-    fn write<T>(&mut self, connection_entity: Entity, message: &T) -> Result<bool>
+    /// Attempts to write a message on the current stream.
+    ///
+    /// If `queue` is true the message will be queued to send even if the stream is congested.
+    /// Shared senders share a queue.
+    fn write<T>(&mut self, connection_entity: Entity, queue: bool, message: &T) -> Result<bool>
     where
         T: Serialize + 'static,
     {
@@ -193,7 +225,70 @@ pub trait MessageSender<'w, 's> {
             )?),
         };
 
-        stream_state.write(connection, message_id, message)
+        stream_state.write(connection, message_id, queue, message)
+    }
+
+    /// Returns the number of buffered messages for a connection.
+    fn queue_size(&mut self, connection_entity: Entity) -> usize {
+        let (state, _, _) = self.context();
+        state
+            .streams
+            .get(&connection_entity)
+            .map(|state| state.buffer.len())
+            .unwrap_or(0)
+    }
+
+    /// Closes all streams that don't have queued data gracefully.
+    fn close_unused_streams(&mut self) -> Result {
+        let (state, params, _) = self.context();
+
+        let mut remove_streams = Vec::new();
+
+        for (&connection_entity, state) in &mut state.streams {
+            if !state.buffer.is_empty() {
+                continue;
+            }
+
+            let Ok((&ConnectionOf(endpoint_entity), _)) =
+                params.connection_q.get(connection_entity)
+            else {
+                remove_streams.push(connection_entity);
+                continue;
+            };
+
+            let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
+            let connection = endpoint.get_connection(connection_entity)?;
+
+            state.close(connection, true)?;
+
+            remove_streams.push(connection_entity);
+        }
+
+        for connection_entity in remove_streams {
+            state.streams.remove(&connection_entity);
+        }
+
+        Ok(())
+    }
+
+    /// Closes all streams, dropping any queued messages that haven't been sent.
+    fn close_all_streams(&mut self, graceful: bool) -> Result {
+        let (state, params, _) = self.context();
+
+        for (connection_entity, mut state) in std::mem::take(&mut state.streams) {
+            let Ok((&ConnectionOf(endpoint_entity), _)) =
+                params.connection_q.get(connection_entity)
+            else {
+                continue;
+            };
+
+            let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
+            let connection = endpoint.get_connection(connection_entity)?;
+
+            state.close(connection, graceful)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -251,5 +346,17 @@ impl AddSharedMessageSender for App {
             requirements: requirements.with_ordered(true),
             state: MessageSenderState::default(),
         });
+
+        self.add_systems(
+            DEFAULT_TRANSPORT_SCHEDULE,
+            flush_shared_message_sender::<S>.before(TransportUpdateSystems),
+        );
     }
+}
+
+fn flush_shared_message_sender<S>(mut sender: SharedMessageSender<'_, '_, S>) -> Result
+where
+    S: Send + Sync + 'static,
+{
+    sender.flush()
 }
