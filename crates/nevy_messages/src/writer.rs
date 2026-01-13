@@ -209,10 +209,12 @@ pub trait MessageSender<'w, 's> {
             .ok_or("Entity is not a connection with a messaging protocol.")?;
 
         let protocol = params.protocol_q.get(**protocol_entity)?;
-        let &message_id = protocol
-            .lookup
-            .get(&TypeId::of::<T>())
-            .ok_or("This connection's protocol doesn't have an id assigned for this message")?;
+        let &message_id = protocol.lookup.get(&TypeId::of::<T>()).ok_or_else(|| {
+            format!(
+                "This connection's protocol doesn't have an id assigned for message `{}`",
+                std::any::type_name::<T>()
+            )
+        })?;
 
         let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
         let mut connection = endpoint.get_connection(connection_entity)?;

@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 
 use crate::varint::*;
 use bevy::{platform::collections::HashMap, prelude::*};
-use log::debug;
 use nevy_transport::prelude::*;
 
 #[derive(Component, Default)]
@@ -35,8 +34,6 @@ pub(crate) fn accept_streams(
         let mut connection = endpoint.get_connection(connection_entity)?;
 
         while let Some((stream, _)) = connection.accept_stream() {
-            debug!("Accepted a stream");
-
             readers.readers.push((
                 stream,
                 MessageStreamReaderState::ReceivingId {

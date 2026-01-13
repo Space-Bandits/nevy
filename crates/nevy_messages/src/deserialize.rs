@@ -1,7 +1,7 @@
 use std::{any::TypeId, collections::VecDeque};
 
 use bevy::prelude::*;
-use log::{debug, warn};
+use log::warn;
 use serde::de::DeserializeOwned;
 
 use crate::{
@@ -102,8 +102,6 @@ where
             };
 
             deserialized_buffer.messages.push_back(message);
-
-            debug!("Deserialized a message");
         }
     }
 
