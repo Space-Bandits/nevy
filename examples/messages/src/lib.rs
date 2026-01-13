@@ -1,10 +1,11 @@
+use bevy::prelude::*;
 use nevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub fn message_protocol() -> MessageProtocol<usize> {
-    ordered_protocol! {
-        HelloServer,
-    }
+pub fn build(app: &mut App) {
+    app.init_protocol::<()>();
+
+    app.add_protocol_message::<(), HelloServer>();
 }
 
 #[derive(Serialize, Deserialize)]

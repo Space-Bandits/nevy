@@ -2,7 +2,7 @@ use bevy::{
     log::{Level, LogPlugin},
     prelude::*,
 };
-use messages::*;
+use messages::HelloServer;
 use nevy::prelude::*;
 
 fn main() {
@@ -14,7 +14,8 @@ fn main() {
         ..default()
     });
     app.add_plugins(NevyPlugins::default());
-    app.add_message_protocol(message_protocol());
+
+    messages::build(&mut app);
 
     app.add_systems(Startup, setup);
     app.add_observer(log_status_changes);
@@ -26,9 +27,10 @@ fn main() {
 /// Creates an endpoint and initiates a connection.
 fn setup(mut commands: Commands) {
     let endpoint_entity = commands
-        .spawn(
+        .spawn((
+            ConnectionProtocol::<()>::default(),
             QuicEndpoint::new("0.0.0.0:0", quinn_proto::EndpointConfig::default(), None).unwrap(),
-        )
+        ))
         .id();
 
     commands.spawn((
@@ -44,7 +46,6 @@ fn setup(mut commands: Commands) {
 fn send_messages(
     connection_q: Query<(Entity, &ConnectionStatus), Changed<ConnectionStatus>>,
     mut sender: LocalMessageSenderUnord,
-    message_id: Res<MessageId<HelloServer>>,
 ) -> Result {
     sender.flush()?;
 
@@ -55,7 +56,6 @@ fn send_messages(
 
         sender.write(
             connection_entity,
-            *message_id,
             &HelloServer {
                 data: "Hello Server!".into(),
             },

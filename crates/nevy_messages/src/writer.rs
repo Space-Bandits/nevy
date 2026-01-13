@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{any::TypeId, marker::PhantomData};
 
 use bevy::{
     ecs::system::SystemParam,
@@ -9,7 +9,10 @@ use bytes::Bytes;
 use nevy_transport::prelude::*;
 use serde::Serialize;
 
-use crate::{protocol::MessageId, varint::VarInt};
+use crate::{
+    protocol::{ConnectionProtocolEntity, Protocol},
+    varint::VarInt,
+};
 
 pub struct MessageStreamState {
     stream: Stream,
@@ -41,10 +44,10 @@ impl MessageStreamState {
         Ok(())
     }
 
-    pub fn write<T, P>(
+    pub fn write<T>(
         &mut self,
         mut connection: Connection,
-        message_id: MessageId<T, P>,
+        message_id: usize,
         message: &T,
     ) -> Result<bool>
     where
@@ -60,7 +63,7 @@ impl MessageStreamState {
 
         let mut buffer = Vec::new();
 
-        VarInt::from_u64(message_id.id as u64)
+        VarInt::from_u64(message_id as u64)
             .ok_or("Message id was too big for VarInt")?
             .encode(&mut buffer);
 
@@ -85,8 +88,9 @@ pub struct MessageSenderState {
 
 #[derive(SystemParam)]
 pub struct MessageSenderParams<'w, 's> {
-    connection_q: Query<'w, 's, &'static ConnectionOf>,
+    connection_q: Query<'w, 's, (&'static ConnectionOf, &'static ConnectionProtocolEntity)>,
     endpoint_q: Query<'w, 's, &'static mut Endpoint>,
+    protocol_q: Query<'w, 's, &'static Protocol>,
 }
 
 /*
@@ -139,7 +143,8 @@ pub trait MessageSender<'w, 's> {
         let mut remove_streams = Vec::new();
 
         for (&connection_entity, stream_state) in &mut state.streams {
-            let Ok(&ConnectionOf(endpoint_entity)) = params.connection_q.get(connection_entity)
+            let Ok((&ConnectionOf(endpoint_entity), _)) =
+                params.connection_q.get(connection_entity)
             else {
                 // If the connection no longer exists remove the stream.
                 remove_streams.push(connection_entity);
@@ -159,18 +164,24 @@ pub trait MessageSender<'w, 's> {
         Ok(())
     }
 
-    fn write<P, T>(
-        &mut self,
-        connection_entity: Entity,
-        message_id: MessageId<T, P>,
-        message: &T,
-    ) -> Result<bool>
+    fn write<T>(&mut self, connection_entity: Entity, message: &T) -> Result<bool>
     where
-        T: Serialize,
+        T: Serialize + 'static,
     {
         let (state, params, requirements) = self.context();
 
-        let &ConnectionOf(endpoint_entity) = params.connection_q.get(connection_entity)?;
+        let (&ConnectionOf(endpoint_entity), protocol_entity) = params
+            .connection_q
+            .get(connection_entity)
+            .ok()
+            .ok_or("Entity is not a connection with a messaging protocol.")?;
+
+        let protocol = params.protocol_q.get(**protocol_entity)?;
+        let &message_id = protocol
+            .lookup
+            .get(&TypeId::of::<T>())
+            .ok_or("This connection's protocol doesn't have an id assigned for this message")?;
+
         let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
         let mut connection = endpoint.get_connection(connection_entity)?;
 

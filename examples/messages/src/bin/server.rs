@@ -2,7 +2,7 @@ use bevy::{
     log::{Level, LogPlugin},
     prelude::*,
 };
-use messages::*;
+use messages::HelloServer;
 use nevy::prelude::*;
 
 fn main() {
@@ -14,7 +14,8 @@ fn main() {
         ..default()
     });
     app.add_plugins(NevyPlugins::default());
-    app.add_message_protocol(message_protocol());
+
+    messages::build(&mut app);
 
     app.add_systems(Startup, setup);
     app.add_observer(accept_connections);
@@ -27,7 +28,7 @@ fn main() {
 /// Spawns an endpoint that can accept connections.
 fn setup(mut commands: Commands) {
     commands.spawn((
-        ReceiveProtocol::<()>::default(),
+        ConnectionProtocol::<()>::default(),
         QuicEndpoint::new(
             "0.0.0.0:27518",
             quinn_proto::EndpointConfig::default(),

@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 
 use crate::varint::*;
 use bevy::{platform::collections::HashMap, prelude::*};
+use log::debug;
 use nevy_transport::prelude::*;
 
 #[derive(Component, Default)]
