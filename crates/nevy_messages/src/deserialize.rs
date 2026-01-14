@@ -88,9 +88,8 @@ where
         };
 
         while let Some(message) = serialized_buffer.pop_front() {
-            let message = match bincode::serde::decode_from_slice(&message, crate::bincode_config())
-            {
-                Ok((message, _)) => message,
+            let message = match postcard::from_bytes::<T>(&message) {
+                Ok(message) => message,
                 Err(err) => {
                     warn!(
                         "Failed to deserialize message of type {}: {}",

@@ -60,7 +60,3 @@ impl Plugin for NevyMessagesPlugin {
 
 #[derive(Resource, Deref)]
 struct NevyMessagesSchedule(Interned<dyn ScheduleLabel>);
-
-pub fn bincode_config() -> bincode::config::Configuration {
-    bincode::config::standard()
-}

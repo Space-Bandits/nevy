@@ -67,7 +67,7 @@ impl MessageStreamState {
             return Ok(false);
         }
 
-        let message = bincode::serde::encode_to_vec(message, crate::bincode_config())?;
+        let message = postcard::to_stdvec(message)?;
 
         let mut buffer = Vec::with_capacity(message.len() + 16);
 
