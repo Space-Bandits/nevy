@@ -1,0 +1,10 @@
+[package]
+name = "quic"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nevy.path = "../../"
+rustls = { version = "0.23.5", default-features = false, features = ["std"] }
+rcgen = "0.13.1"
+bevy = { version = "0.17" }

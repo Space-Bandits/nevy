@@ -1,175 +1,50 @@
-#![doc = include_str!("../readme.md")]
-
 use bevy::{
+    app::PluginGroupBuilder,
     ecs::{intern::Interned, schedule::ScheduleLabel},
     prelude::*,
 };
 
-mod connection;
-mod endpoint;
-
-#[cfg(feature = "headers")]
-pub(crate) mod headers;
+pub use nevy_transport as transport;
 
 #[cfg(feature = "messages")]
-pub(crate) mod messages;
+pub use nevy_messages as messages;
 
-pub use quinn_proto::{self, Dir};
+pub mod prelude {
+    pub use nevy_transport::prelude::*;
 
-pub use connection::{
-    Chunk, ConnectionMut, ResetStreamError, StopStreamError, StreamEvent, StreamFinishError,
-    StreamId, StreamReadError, StreamWriteError, StreamsExhausted, VarIntBoundsExceeded,
-};
+    #[cfg(feature = "messages")]
+    pub use nevy_messages::prelude::*;
 
-pub use endpoint::{
-    ConnectionStatus, IncomingConnectionHandler, NoConnectionState, QuicConnection,
-    QuicConnectionConfig, QuicEndpoint,
-};
+    pub use crate::NevyPlugins;
+}
 
-#[cfg(feature = "headers")]
-pub use headers::{
-    EndpointWithHeaderedConnections, HeaderedStreamState, NevyHeaderPlugin, RecvStreamHeaders,
-    UpdateHeaderSystems,
-};
-
-#[cfg(feature = "messages")]
-pub use messages::{
-    AddNetMessage, EndpointWithNetMessageConnections, NetMessageId, NetMessageReceiveHeader,
-    NetMessageReceiveStreams, NevyNetMessagesPlugin, ReceivedNetMessages, UpdateNetMessageSystems,
-    senders::{
-        AddSharedSender, LocalNetMessageSender, NetMessageSendHeader, NetMessageSendStreamState,
-        NetMessageSender, SharedNetMessageSender,
-    },
-};
-
-/// The schedule that nevy performs updates in by default
-pub const DEFAULT_NEVY_SCHEDULE: PostUpdate = PostUpdate;
-
-/// System set where quic endpoints are updated and packets are sent and received.
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct UpdateEndpointSystems;
-
-/// Plugin which adds observers and update systems for quic endpoints and connections.
-///
-/// The default schedule for network updates is `PostUpdate`.
-pub struct NevyPlugin {
+/// Adds plugins for all enabled features.
+pub struct NevyPlugins {
     schedule: Interned<dyn ScheduleLabel>,
 }
 
-impl NevyPlugin {
-    /// Creates a new plugin with updates happening in a specified schedule.
+impl NevyPlugins {
     pub fn new(schedule: impl ScheduleLabel) -> Self {
-        NevyPlugin {
+        NevyPlugins {
             schedule: schedule.intern(),
         }
     }
 }
 
-impl Default for NevyPlugin {
+impl Default for NevyPlugins {
     fn default() -> Self {
-        Self::new(DEFAULT_NEVY_SCHEDULE)
+        Self::new(nevy_transport::DEFAULT_TRANSPORT_SCHEDULE)
     }
 }
 
-impl Plugin for NevyPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_observer(endpoint::inserted_connection_of_observer);
-        app.add_observer(endpoint::removed_connection_of_observer);
+impl PluginGroup for NevyPlugins {
+    fn build(self) -> PluginGroupBuilder {
+        let builder = PluginGroupBuilder::start::<Self>()
+            .add_group(nevy_transport::NevyTransportPlugins::new(self.schedule));
 
-        app.add_systems(
-            self.schedule,
-            endpoint::update_endpoints.in_set(UpdateEndpointSystems),
-        );
-    }
-}
+        #[cfg(feature = "messages")]
+        let builder = builder.add(nevy_messages::NevyMessagesPlugin::new(self.schedule));
 
-/// Relationship target for all [ConnectionOf]s for a [QuicEndpoint]
-///
-/// Use this component to get all the current connections on an endpoint.
-#[derive(Component, Default)]
-#[relationship_target(relationship = ConnectionOf)]
-pub struct EndpointOf(Vec<Entity>);
-
-impl EndpointOf {
-    pub fn iter(&self) -> std::slice::Iter<'_, Entity> {
-        self.0.iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a EndpointOf {
-    type Item = &'a Entity;
-    type IntoIter = std::slice::Iter<'a, Entity>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-/// This component represents a connection on a [QuicEndpoint].
-///
-/// This component will be inserted on a new entity when a connection is accepted.
-///
-/// Insert this component along with a [QuicConnectionConfig] to open a connection.
-///
-/// This component will not be removed when the connection is closed.
-/// This is because there may still be data to be read from the connection.
-/// You should add logic to either despawn connections that you are finished with
-/// or reinsert this component to reopen the connection.
-///
-/// Removing this component or despawning the entity whilst a connection is open will
-/// ungracefully drop the connection and the endpoint will stop responding to the peer.
-#[derive(Component, Deref)]
-#[component(immutable)]
-#[relationship(relationship_target = EndpointOf)]
-pub struct ConnectionOf(pub Entity);
-
-/// This type implements [IncomingConnectionHandler] and will always accept incoming connections.
-///
-/// [Self::new] will create a `Box<dyn IncomingConnectionHandler>`.
-pub struct AlwaysAcceptIncoming;
-
-impl IncomingConnectionHandler for AlwaysAcceptIncoming {
-    fn request(&mut self, _incoming: &quinn_proto::Incoming) -> bool {
-        true
-    }
-}
-
-impl AlwaysAcceptIncoming {
-    pub fn new() -> Box<dyn IncomingConnectionHandler> {
-        Box::new(AlwaysAcceptIncoming)
-    }
-}
-
-/// This type implements [IncomingConnectionHandler] and will always reject incoming connections.
-///
-/// [Self::new] will create a `Box<dyn IncomingConnectionHandler>`.
-pub struct AlwaysRejectIncoming;
-
-impl IncomingConnectionHandler for AlwaysRejectIncoming {
-    fn request(&mut self, _incoming: &quinn_proto::Incoming) -> bool {
-        false
-    }
-}
-
-impl AlwaysRejectIncoming {
-    pub fn new() -> Box<dyn IncomingConnectionHandler> {
-        Box::new(AlwaysRejectIncoming)
-    }
-}
-
-pub(crate) fn udp_transmit<'a>(
-    transmit: &'a quinn_proto::Transmit,
-    buffer: &'a [u8],
-) -> quinn_udp::Transmit<'a> {
-    quinn_udp::Transmit {
-        destination: transmit.destination,
-        ecn: transmit.ecn.map(|ecn| match ecn {
-            quinn_proto::EcnCodepoint::Ect0 => quinn_udp::EcnCodepoint::Ect0,
-            quinn_proto::EcnCodepoint::Ect1 => quinn_udp::EcnCodepoint::Ect1,
-            quinn_proto::EcnCodepoint::Ce => quinn_udp::EcnCodepoint::Ce,
-        }),
-        contents: &buffer[0..transmit.size],
-        segment_size: transmit.segment_size,
-        src_ip: transmit.src_ip,
+        builder
     }
 }

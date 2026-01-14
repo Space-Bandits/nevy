@@ -1,0 +1,25 @@
+[package]
+name = "nevy_transport"
+version = "0.3.0"
+edition = "2024"
+categories = ["network-programming", "game-development"]
+description = "QUIC implementation with quinn for the bevy game engine"
+keywords = ["netcode", "networking", "bevy"]
+license = "MIT OR Apache-2.0"
+readme = "readme.md"
+repository = "https://github.com/space-bandits/nevy"
+documentation = "https://docs.rs/nevy"
+
+[features]
+default = ["quic"]
+quic = ["dep:quinn-proto", "dep:quinn-udp"]
+
+[dependencies]
+bevy.workspace = true
+log.workspace = true
+bytes.workspace = true
+
+thiserror = "2.0"
+
+quinn-proto = { version = "0.11.3", features = ["rustls"], optional = true }
+quinn-udp = { version = "0.5.14", optional = true }

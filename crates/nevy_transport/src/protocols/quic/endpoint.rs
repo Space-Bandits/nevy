@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     collections::VecDeque,
     io::IoSliceMut,
     net::{SocketAddr, ToSocketAddrs, UdpSocket},
@@ -7,18 +8,24 @@ use std::{
 };
 
 use bevy::{platform::collections::HashMap, prelude::*};
-
+use bytes::Bytes;
 use log::{error, warn};
-use quinn_proto::{ClientConfig, ConnectionHandle, DatagramEvent, Incoming};
+use quinn_proto::{
+    ClientConfig, ConnectError, ConnectionError, ConnectionHandle, DatagramEvent, Incoming, VarInt,
+};
 use quinn_udp::{UdpSockRef, UdpSocketState};
-use thiserror::Error;
 
-use crate::{ConnectionMut, ConnectionOf, EndpointOf, connection::ConnectionState, udp_transmit};
+use crate::{
+    Connection, ConnectionOf, ConnectionStatus, Endpoint, NoConnectionError, Transport,
+    protocols::quic::{
+        connection::{CloseFlagState, QuicConnectionContext, QuicConnectionState},
+        udp_transmit,
+    },
+};
 
-/// Must be inserted onto a connection entity to open a connection.
+/// Used to initiate a connection on a [`QuicEndpoint`] [`Endpoint`]
 ///
-/// This component is not removed or modified and can be reused if a connection is opened and closed multiple times.
-/// It will not be inserted when a connection is accepted.
+/// When present on an entity when a [`ConnectionOf`] component is inserted it will be used to open a connection.
 #[derive(Component, Clone)]
 pub struct QuicConnectionConfig {
     pub client_config: ClientConfig,
@@ -26,84 +33,112 @@ pub struct QuicConnectionConfig {
     pub server_name: String,
 }
 
-/// A quic endpoint.
-///
-/// This component contains the entire state machine for the endpoint and all connections.
-/// Querying this component is required for sending and receiving data on any of the connections.
-#[derive(Component)]
-#[require(EndpointOf)]
-pub struct QuicEndpoint {
-    endpoint: quinn_proto::Endpoint,
-    connections: HashMap<ConnectionHandle, ConnectionState>,
-    socket: UdpSocket,
-    socket_state: quinn_udp::UdpSocketState,
-    local_addr: SocketAddr,
-    endpoint_config: quinn_proto::EndpointConfig,
-    server_config: Option<quinn_proto::ServerConfig>,
-    recv_buffer: Vec<u8>,
-    send_buffer: Vec<u8>,
-    pub incoming_handler: Box<dyn IncomingConnectionHandler>,
-}
+/// When a connection changes to [`ConnectionStatus::Closed`] on a [`QuicEndpoint`] this component will be inserted with the reason.
+#[derive(Component, Deref)]
+pub struct QuicConnectionClosedReason(ConnectionError);
 
-/// Component that exists on an entity when it is a [ConnectionOf] a [QuicEndpoint].
-///
-/// Used to identify the quic connection state within it's associated endpoint.
-///
-/// This component existing does not mean the connection is established.
-/// Use [ConnectionStatus] to respond to the connecting, established and closed lifecycle stages.
-///
-/// This component will not be removed when the connection is closed, this is your responsibility.
-/// Removing this component by removing the [ConnectionOf](crate::ConnectionOf)
-/// will drop the connection ungracefully.
-#[derive(Component)]
-#[component(immutable)]
-#[require(ConnectionStatus)]
-pub struct QuicConnection {
-    /// Contains the connection handle that is mapped to this entity in the [QuicEndpoint] of this connection.
-    connection_handle: ConnectionHandle,
-}
+/// When a connection changes to [`ConnectionStatus::Failed`] on a [`QuicEndpoint`] this component will be inserted with the reason.
+#[derive(Component, Deref)]
+pub struct QuicConnectionFailedReason(ConnectError);
 
-/// The status of a [QuicConnection].
+/// When a [`QuicEndpoint`] receives an incoming connection an entity with this component will be created.
 ///
-/// This component is immutable, it's lifecycle events can be used to respond to updates.
-#[derive(Component, Default)]
-#[component(immutable)]
-pub enum ConnectionStatus {
-    /// The initial state for a [QuicConnection].
-    #[default]
-    Connecting,
-    /// The connection is established and ready to use.
-    Established,
-    /// The connection is closed.
-    /// You may still be able to get the connection state from the [QuicEndpoint] if there is unread data,
-    /// otherwise the [ConnectionOf] component can be removed without losing data.
-    Closed {
-        reason: quinn_proto::ConnectionError,
-    },
-    /// The connection enters this state when the [QuicEndpoint] couldn't open a connection.
+/// Either despawn the entity to reject or insert a [`ConnectionOf`] pointing to [`Self::endpoint_entity`] to accept the connection.
+#[derive(Component)]
+pub struct IncomingQuicConnection {
+    pub endpoint_entity: Entity,
+    /// Wrapped in an option so that ownership can be taken back by the endpoint to accept the connection.
     ///
-    /// In this case no [QuicEndpoint] component will exist
-    Failed { error: quinn_proto::ConnectError },
+    /// Should always be [`Some`] until the [`ConnectionOf`] is inserted.
+    pub incoming: Option<Incoming>,
 }
 
-pub(crate) fn inserted_connection_of_observer(
+struct EndpointUpdateContext<'w, 's> {
+    endpoint_entity: Entity,
+    commands: Commands<'w, 's>,
+}
+
+pub(super) fn update_endpoints(
+    mut commands: Commands,
+    mut endpoint_q: Query<(Entity, &mut Endpoint)>,
+) {
+    for (endpoint_entity, mut endpoint) in endpoint_q.iter_mut() {
+        let Some(endpoint) = endpoint.as_transport::<QuicEndpoint>() else {
+            continue;
+        };
+
+        endpoint.update(EndpointUpdateContext {
+            endpoint_entity,
+            commands: commands.reborrow(),
+        });
+    }
+}
+
+pub(super) fn create_connections(
     insert: On<Insert, ConnectionOf>,
     mut commands: Commands,
-    mut endpoint_q: Query<&mut QuicEndpoint>,
-    connection_q: Query<(
+    mut endpoint_q: Query<&mut Endpoint>,
+    mut connection_q: Query<(
         &ConnectionOf,
         Option<&QuicConnectionConfig>,
-        Has<QuicConnection>,
+        Option<&mut IncomingQuicConnection>,
     )>,
 ) -> Result {
     let connection_entity = insert.entity;
 
-    let (connection_of, config, opened_by_endpoint) = connection_q.get(connection_entity)?;
+    let (connection_of, config, incoming) = connection_q.get_mut(connection_entity)?;
 
     // confirm that the endpoint has the right components
     let mut endpoint = endpoint_q.get_mut(**connection_of)?;
 
-    if !opened_by_endpoint {
+    let Some(endpoint) = endpoint.as_transport::<QuicEndpoint>() else {
+        // Another transport layer is responsible for this connection.
+        return Ok(());
+    };
+
+    if let Some(mut incoming) = incoming {
+        commands
+            .entity(connection_entity)
+            .remove::<IncomingQuicConnection>();
+
+        let Some(incoming) = incoming.incoming.take() else {
+            error!("User tried to accept an incoming connection twice.");
+            return Ok(());
+        };
+
+        match endpoint.endpoint.accept(
+            incoming,
+            std::time::Instant::now(),
+            &mut endpoint.send_buffer,
+            None,
+        ) {
+            Err(err) => {
+                if let Some(transmit) = err.response {
+                    let _ = endpoint.socket_state.send(
+                        UdpSockRef::from(&endpoint.socket),
+                        &udp_transmit(&transmit, &endpoint.send_buffer),
+                    );
+                }
+            }
+            Ok((connection_handle, connection)) => {
+                endpoint
+                    .connection_handles
+                    .insert(connection_entity, connection_handle);
+
+                endpoint.connections.insert(
+                    connection_handle,
+                    QuicConnectionState {
+                        connection_entity,
+                        connection,
+                        stream_events: VecDeque::new(),
+                        close: CloseFlagState::None,
+                        datagrams_queue_offset: 0,
+                        datagrams: VecDeque::new(),
+                    },
+                );
+            }
+        };
+    } else {
         // this connection was inserted by the application. Open a connection
 
         let connection_config = config.ok_or_else(|| {
@@ -130,50 +165,50 @@ pub(crate) fn inserted_connection_of_observer(
 
                 commands
                     .entity(connection_entity)
-                    .insert(ConnectionStatus::Failed { error });
+                    .insert((ConnectionStatus::Failed, QuicConnectionFailedReason(error)));
 
                 return Ok(());
             }
         };
 
+        endpoint
+            .connection_handles
+            .insert(connection_entity, connection_handle);
+
         endpoint.connections.insert(
             connection_handle,
-            ConnectionState {
+            QuicConnectionState {
                 connection_entity,
                 connection,
                 stream_events: VecDeque::new(),
-                close: None,
+                close: CloseFlagState::None,
+                datagrams_queue_offset: 0,
+                datagrams: VecDeque::new(),
             },
         );
-
-        commands
-            .entity(connection_entity)
-            .insert(QuicConnection { connection_handle });
     }
 
     Ok(())
 }
 
-pub(crate) fn removed_connection_of_observer(
+pub(super) fn remove_connections(
     replace: On<Replace, ConnectionOf>,
-    mut commands: Commands,
     connection_q: Query<&ConnectionOf>,
-    mut endpoint_q: Query<&mut QuicEndpoint>,
+    mut endpoint_q: Query<&mut Endpoint>,
 ) -> Result {
     let connection_entity = replace.entity;
 
     let connection_of = connection_q.get(connection_entity)?;
 
-    // remove associated components
-    commands
-        .entity(connection_entity)
-        .try_remove::<QuicConnection>();
-
-    // ungracefully drop the connection state
-
     let Ok(mut endpoint) = endpoint_q.get_mut(**connection_of) else {
         return Ok(());
     };
+
+    let Some(endpoint) = endpoint.as_transport::<QuicEndpoint>() else {
+        return Ok(());
+    };
+
+    // ungracefully drop the connection state
 
     if let Some((connection_handle, already_drained)) =
         endpoint
@@ -199,21 +234,49 @@ pub(crate) fn removed_connection_of_observer(
     Ok(())
 }
 
-pub(crate) struct EndpointUpdateContext<'w, 's> {
-    endpoint_entity: Entity,
-    commands: Commands<'w, 's>,
+pub(super) fn refuse_connections(
+    replace: On<Replace, IncomingQuicConnection>,
+    mut endpoint_q: Query<&mut Endpoint>,
+    mut connection_q: Query<&mut IncomingQuicConnection>,
+) -> Result {
+    let connection_entity = replace.entity;
+
+    let mut incoming_component = connection_q.get_mut(connection_entity)?;
+
+    if let Some(incoming) = incoming_component.incoming.take() {
+        // if the incoming connection still exists when the component is removed, refuse the connection.
+
+        let mut endpoint = endpoint_q.get_mut(incoming_component.endpoint_entity)?;
+
+        let endpoint = endpoint
+            .as_transport::<QuicEndpoint>()
+            .ok_or("An incoming quic connection should always be pointing to a quic endpoint")?;
+
+        let transmit = endpoint
+            .endpoint
+            .refuse(incoming, &mut endpoint.send_buffer);
+
+        let _ = endpoint.socket_state.send(
+            UdpSockRef::from(&endpoint.socket),
+            &udp_transmit(&transmit, &endpoint.send_buffer),
+        );
+    }
+
+    Ok(())
 }
 
-pub(crate) fn update_endpoints(
-    mut commands: Commands,
-    mut endpoint_q: Query<(Entity, &mut QuicEndpoint)>,
-) {
-    for (endpoint_entity, mut endpoint) in endpoint_q.iter_mut() {
-        endpoint.update(EndpointUpdateContext {
-            endpoint_entity,
-            commands: commands.reborrow(),
-        });
-    }
+/// An implementation of [`Transport`] using [`quinn_proto`].
+pub struct QuicEndpoint {
+    endpoint: quinn_proto::Endpoint,
+    connection_handles: HashMap<Entity, ConnectionHandle>,
+    connections: HashMap<ConnectionHandle, QuicConnectionState>,
+    socket: UdpSocket,
+    socket_state: quinn_udp::UdpSocketState,
+    local_addr: SocketAddr,
+    endpoint_config: quinn_proto::EndpointConfig,
+    server_config: Option<quinn_proto::ServerConfig>,
+    recv_buffer: Vec<u8>,
+    send_buffer: Vec<u8>,
 }
 
 impl QuicEndpoint {
@@ -223,13 +286,11 @@ impl QuicEndpoint {
     /// - A bind address for the UDP socket.
     /// - A [quin_proto] endpoint config
     /// - A [quin_proto] server config. If this is `None` then the endpoint won't be able to accept incoming connections.
-    /// - An [IncomingConnectionHandler] responsible for deciding whether to accept connections.
     pub fn new(
         bind_addr: impl ToSocketAddrs,
         endpoint_config: quinn_proto::EndpointConfig,
         server_config: Option<quinn_proto::ServerConfig>,
-        incoming_handler: Box<dyn IncomingConnectionHandler>,
-    ) -> Result<Self, std::io::Error> {
+    ) -> Result<Endpoint, std::io::Error> {
         let socket = UdpSocket::bind(bind_addr)?;
         let socket_state = UdpSocketState::new(UdpSockRef::from(&socket))?;
         let local_addr = socket.local_addr()?;
@@ -241,8 +302,9 @@ impl QuicEndpoint {
             None,
         );
 
-        Ok(Self {
+        let endpoint = Self {
             endpoint,
+            connection_handles: HashMap::new(),
             connections: HashMap::new(),
             socket,
             socket_state,
@@ -251,33 +313,9 @@ impl QuicEndpoint {
             server_config,
             recv_buffer: Vec::new(),
             send_buffer: Vec::new(),
-            incoming_handler: incoming_handler,
-        })
-    }
+        };
 
-    /// Replaces the current [IncomingConnectionHandler] and returns it.
-    pub fn set_incoming_handler(
-        &mut self,
-        incoming_handler: Box<dyn IncomingConnectionHandler>,
-    ) -> Box<dyn IncomingConnectionHandler> {
-        std::mem::replace(&mut self.incoming_handler, incoming_handler)
-    }
-
-    /// Gets the connection state for a [QuicConnection] associated with this endpoint.
-    pub fn get_connection<'a>(
-        &'a mut self,
-        connection: &QuicConnection,
-    ) -> Result<ConnectionMut<'a>, NoConnectionState> {
-        self.connections
-            .get_mut(&connection.connection_handle)
-            .ok_or(NoConnectionState)
-            .map(|connection| ConnectionMut {
-                connection,
-                send_buffer: &mut self.send_buffer,
-                max_datagrams: self.socket_state.gro_segments(),
-                socket: &self.socket,
-                socket_state: &self.socket_state,
-            })
+        Ok(Endpoint::new(endpoint))
     }
 
     fn update(&mut self, mut context: EndpointUpdateContext) {
@@ -409,7 +447,7 @@ impl QuicEndpoint {
         context: &mut EndpointUpdateContext,
     ) -> Option<quinn_proto::Transmit> {
         if self.server_config.is_none() {
-            warn!(
+            error!(
                 "remote address {} attempted to connect on endpoint {} {} but the endpoint isn't configured as a server",
                 incoming.remote_address(),
                 context.endpoint_entity,
@@ -418,58 +456,30 @@ impl QuicEndpoint {
             return Some(self.endpoint.refuse(incoming, &mut self.send_buffer));
         }
 
-        // use the incoming connection handler to decide whether to accept the connection
-        if !self.incoming_handler.request(&incoming) {
-            return Some(self.endpoint.refuse(incoming, &mut self.send_buffer));
-        };
+        context.commands.spawn(IncomingQuicConnection {
+            endpoint_entity: context.endpoint_entity,
+            incoming: Some(incoming),
+        });
 
-        match self.endpoint.accept(
-            incoming,
-            std::time::Instant::now(),
-            &mut self.send_buffer,
-            None,
-        ) {
-            Err(err) => return err.response,
-            Ok((connection_handle, connection)) => {
-                let connection_entity = context
-                    .commands
-                    .spawn((
-                        ConnectionOf(context.endpoint_entity),
-                        QuicConnection { connection_handle },
-                    ))
-                    .id();
-
-                self.connections.insert(
-                    connection_handle,
-                    ConnectionState {
-                        connection_entity,
-                        connection,
-                        stream_events: VecDeque::new(),
-                        close: None,
-                    },
-                );
-
-                None
-            }
-        }
+        None
     }
 
     fn update_connections(&mut self, context: &mut EndpointUpdateContext) {
         for (&connection_handle, connection) in self.connections.iter_mut() {
-            if let Some((code, reason)) = connection.close.take() {
+            if let CloseFlagState::Sent = connection.close {
+                connection.close = CloseFlagState::Received;
+
                 connection
                     .connection
-                    .close(Instant::now(), code, reason.into());
+                    .close(Instant::now(), VarInt::from_u32(0), Bytes::new());
 
                 context
                     .commands
                     .entity(connection.connection_entity)
-                    .insert(ConnectionStatus::Closed {
-                        reason: quinn_proto::ConnectionError::LocallyClosed,
-                    });
+                    .insert(ConnectionStatus::Closed);
             }
 
-            ConnectionMut {
+            QuicConnectionContext {
                 connection,
                 send_buffer: &mut self.send_buffer,
                 max_datagrams: self.socket_state.gro_segments(),
@@ -509,7 +519,7 @@ impl QuicEndpoint {
                         context
                             .commands
                             .entity(connection.connection_entity)
-                            .insert(ConnectionStatus::Closed { reason });
+                            .insert((ConnectionStatus::Closed, QuicConnectionClosedReason(reason)));
                     }
                     quinn_proto::Event::Stream(event) => {
                         connection.stream_events.push_back(event.into());
@@ -522,12 +532,28 @@ impl QuicEndpoint {
     }
 }
 
-/// Returned when attempting to get the connection state from a [QuicEndpoint] with an invalid [QuicConnection]
-#[derive(Clone, Copy, Debug, Error)]
-#[error("Connection state does not exist on this endpoint")]
-pub struct NoConnectionState;
+impl Transport for QuicEndpoint {
+    fn as_any<'a>(&'a mut self) -> &'a mut dyn Any {
+        self
+    }
 
-/// Implement this trait to define logic for handling incoming connections.
-pub trait IncomingConnectionHandler: Send + Sync + 'static {
-    fn request(&mut self, incoming: &Incoming) -> bool;
+    fn get_connection<'a>(
+        &'a mut self,
+        connection: Entity,
+    ) -> Result<Connection<'a>, NoConnectionError> {
+        let handle = self
+            .connection_handles
+            .get(&connection)
+            .ok_or(NoConnectionError)?;
+
+        let connection = self.connections.get_mut(handle).ok_or(NoConnectionError)?;
+
+        Ok(Connection(Box::new(QuicConnectionContext {
+            connection,
+            send_buffer: &mut self.send_buffer,
+            max_datagrams: self.socket_state.gro_segments(),
+            socket: &self.socket,
+            socket_state: &self.socket_state,
+        })))
+    }
 }
