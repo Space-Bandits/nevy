@@ -52,7 +52,7 @@ fn log_status_changes(
     Ok(())
 }
 
-/// When the connection establishes opens a stream, writes a message, and finishes the stream.
+/// When the connection establishes, opens a stream, writes a message, and finishes the stream.
 fn write_messages(
     connection_q: Query<(Entity, &ConnectionOf, &ConnectionStatus), Changed<ConnectionStatus>>,
     mut endpoint_q: Query<&mut Endpoint>,
@@ -63,13 +63,11 @@ fn write_messages(
         };
 
         let mut endpoint = endpoint_q.get_mut(endpoint_entity)?;
-
         let mut connection = endpoint.get_connection(connection_entity)?;
 
         let stream = connection.new_stream(StreamRequirements::UNRELIABLE)?;
 
         let written = connection.write(&stream, "Hello server!".as_bytes().into(), false)?;
-
         info!("Wrote {} bytes", written);
 
         connection.close_send_stream(&stream, true)?;

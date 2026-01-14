@@ -28,6 +28,7 @@ fn main() {
 /// Spawns an endpoint that can accept connections.
 fn setup(mut commands: Commands) {
     commands.spawn((
+        // Assign any connections on this endpoint to use the `()` protocol.
         ConnectionProtocol::<()>::default(),
         QuicEndpoint::new(
             "0.0.0.0:27518",

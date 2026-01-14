@@ -28,13 +28,17 @@ fn main() {
 fn setup(mut commands: Commands) {
     let endpoint_entity = commands
         .spawn((
-            ConnectionProtocol::<()>::default(),
             QuicEndpoint::new("0.0.0.0:0", quinn_proto::EndpointConfig::default(), None).unwrap(),
         ))
         .id();
 
     commands.spawn((
         ConnectionOf(endpoint_entity),
+        // Assign any connections on this endpoint to use the `()` protocol.
+        //
+        // This can be inserted on the endpoint as seen in `server.rs`,
+        // or can be inserted directly on the connection entity.
+        ConnectionProtocol::<()>::default(),
         QuicConnectionConfig {
             client_config: create_connection_config(),
             address: "127.0.0.1:27518".parse().unwrap(),
