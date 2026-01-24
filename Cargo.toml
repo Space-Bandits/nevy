@@ -1,9 +1,9 @@
 [package]
 name = "nevy"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 categories = ["network-programming", "game-development"]
-description = "QUIC implementation with quinn for the bevy game engine"
+description = "Game networking library for the Bevy game engine"
 keywords = ["netcode", "networking", "bevy"]
 license = "MIT OR Apache-2.0"
 readme = "readme.md"
@@ -16,20 +16,15 @@ quic = ["nevy_transport/quic"]
 messages = ["dep:nevy_messages"]
 
 [dependencies]
-nevy_transport = { path = "crates/nevy_transport", version = "0.3.0" }
-nevy_messages = { path = "crates/nevy_messages", version = "0.3.0", optional = true }
+nevy_transport = { path = "crates/nevy_transport", version = "0.4.0" }
+nevy_messages = { path = "crates/nevy_messages", version = "0.4.0", optional = true }
 bevy.workspace = true
-
-[dev-dependencies]
-rustls = { version = "0.23.5", default-features = false, features = ["std"] }
-rcgen = "0.13.1"
-bevy = { version = "0.17" }
 
 [workspace]
 resolver = "3"
 members = ["crates/*", "examples/*"]
 
 [workspace.dependencies]
-bevy = { version = "0.17", default-features = false }
+bevy = { version = "0.18", default-features = false }
 log = "0.4"
 bytes = { version = "1.11" }
