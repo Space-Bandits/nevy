@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Bevy WebTransport Client</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+        input {
+            padding: 8px;
+            width: 400px;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px 5px 10px 0;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        #status {
+            padding: 15px;
+            background: #0f0f1a;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Bevy WebTransport Client (WASM)</h1>
+
+    <div class="controls">
+        <label for="url">Server URL:</label>
+        <input type="text" id="url" value="https://127.0.0.1:4433/">
+
+        <label for="certHash">Certificate Hash (base64):</label>
+        <input type="text" id="certHash" placeholder="Paste the server's certificate hash here">
+
+        <div>
+            <button onclick="connect()">Connect & Run Game</button>
+        </div>
+    </div>
+
+    <div id="status">
+        <p>Open the browser console (F12) to see Bevy logs and messages.</p>
+        <p>Status: <span id="connectionStatus">Not connected</span></p>
+    </div>
+
+    <script type="module">
+        import init, { run_game } from './pkg/webtransport_example.js';
+
+        window.connect = async function() {
+            const url = document.getElementById('url').value;
+            const certHash = document.getElementById('certHash').value.trim();
+
+            if (!certHash) {
+                alert('Please enter the certificate hash from the server output');
+                return;
+            }
+
+            document.getElementById('connectionStatus').textContent = 'Loading WASM...';
+
+            try {
+                await init();
+                document.getElementById('connectionStatus').textContent = 'Starting Bevy game...';
+
+                // This will start the Bevy app which runs in a loop
+                run_game(url, certHash);
+
+                document.getElementById('connectionStatus').textContent = 'Game running (check console)';
+            } catch (e) {
+                console.error('Error:', e);
+                document.getElementById('connectionStatus').textContent = 'Error: ' + e.message;
+            }
+        };
+    </script>
+</body>
+</html>

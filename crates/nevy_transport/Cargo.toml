@@ -14,6 +14,12 @@ documentation = "https://docs.rs/nevy"
 default = ["quic"]
 quic = ["dep:quinn-proto", "dep:quinn-udp"]
 
+# Native WebTransport (desktop/server) - uses H3/QUIC
+webtransport = ["quic", "dep:qpack"]
+
+# Browser WebTransport (WASM) - uses web_sys
+webtransport-web = ["dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
+
 [dependencies]
 bevy.workspace = true
 log.workspace = true
@@ -23,3 +29,23 @@ thiserror = "2.0"
 
 quinn-proto = { version = "0.11.3", features = ["rustls"], optional = true }
 quinn-udp = { version = "0.5.14", optional = true }
+qpack = { version = "0.1", optional = true }
+
+# WASM WebTransport dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", optional = true, features = [
+    "WebTransport",
+    "WebTransportOptions",
+    "WebTransportBidirectionalStream",
+    "WebTransportSendStream",
+    "WebTransportReceiveStream",
+    "WebTransportDatagramDuplexStream",
+    "WebTransportCloseInfo",
+    "ReadableStream",
+    "WritableStream",
+    "ReadableStreamDefaultReader",
+    "WritableStreamDefaultWriter",
+] }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }

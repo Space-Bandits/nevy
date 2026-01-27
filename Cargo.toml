@@ -13,10 +13,14 @@ documentation = "https://docs.rs/nevy"
 [features]
 default = ["quic", "messages"]
 quic = ["nevy_transport/quic"]
+# Native WebTransport (desktop/server) - uses H3/QUIC
+webtransport = ["nevy_transport/webtransport"]
+# Browser WebTransport (WASM) - uses web_sys
+webtransport-web = ["nevy_transport/webtransport-web"]
 messages = ["dep:nevy_messages"]
 
 [dependencies]
-nevy_transport = { path = "crates/nevy_transport", version = "0.4.0" }
+nevy_transport = { path = "crates/nevy_transport", version = "0.4.0", default-features = false }
 nevy_messages = { path = "crates/nevy_messages", version = "0.4.0", optional = true }
 bevy.workspace = true
 
