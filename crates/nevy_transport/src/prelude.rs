@@ -34,3 +34,11 @@ pub use crate::protocols::webtransport_web::{
     connection::{WebTransportWebConnectionContext, WebTransportWebStreamId},
     endpoint::{WebTransportWebConfig, WebTransportWebEndpoint},
 };
+
+// Local channel transport
+#[cfg(feature = "channel")]
+pub use crate::protocols::channel::{
+    ChannelTransportPlugin,
+    ChannelConnectionConfig, ChannelConnectionContext, ChannelEndpoint,
+    ChannelMessage, ChannelRegistry, ChannelStreamId, IncomingChannelConnection,
+};

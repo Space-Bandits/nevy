@@ -518,19 +518,6 @@ impl WebTransportEndpoint {
         None
     }
 
-    fn setup_server_control_stream(&mut self, connection_handle: ConnectionHandle) {
-        let Some(conn) = self.connections.get_mut(&connection_handle) else {
-            return;
-        };
-
-        // Open control stream and send SETTINGS
-        if let Some(stream_id) = conn.quic.connection.streams().open(Dir::Uni) {
-            let settings = H3ControlStream::create_settings_frame();
-            let _ = conn.quic.connection.send_stream(stream_id).write(&settings);
-            conn.control_stream_send = Some(stream_id);
-        }
-    }
-
     fn update_connections(&mut self, context: &mut EndpointUpdateContext) {
         for (&connection_handle, conn) in self.connections.iter_mut() {
             // Handle close flag

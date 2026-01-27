@@ -28,7 +28,7 @@ fn setup(mut commands: Commands) {
 
     // Print certificate hash for Chrome
     println!("\n==============================================");
-    println!("WebTransport Server starting on 0.0.0.0:4433");
+    println!("WebTransport Server starting on [::]:4433");
     println!("==============================================\n");
     println!("Certificate SHA-256 hash (base64):");
     println!("  {}", cert_hash);
@@ -58,7 +58,7 @@ console.log("Received:", new TextDecoder().decode(value));"#, cert_hash);
 
     commands.spawn(
         WebTransportEndpoint::new(
-            "0.0.0.0:4433",
+            "[::]:4433",
             quinn_proto::EndpointConfig::default(),
             Some(server_config),
         )

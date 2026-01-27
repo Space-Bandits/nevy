@@ -55,6 +55,9 @@ impl PluginGroup for NevyTransportPlugins {
         #[cfg(all(feature = "webtransport-web", target_arch = "wasm32"))]
         let builder = builder.add(protocols::webtransport_web::WebTransportWebPlugin::new(self.schedule));
 
+        #[cfg(feature = "channel")]
+        let builder = builder.add(protocols::channel::ChannelTransportPlugin::new(self.schedule));
+
         builder
     }
 }

@@ -29,18 +29,10 @@ const H3_SETTINGS_ENABLE_WEBTRANSPORT: u64 = 0x2b603742;
 pub enum H3Error {
     /// Frame parsing error
     FrameError,
-    /// Missing required settings
-    MissingSettings,
-    /// Peer doesn't support WebTransport
-    WebTransportNotSupported,
-    /// Peer doesn't support datagrams
-    DatagramsNotSupported,
     /// Invalid CONNECT response
     InvalidConnectResponse,
     /// QPACK encoding/decoding error
     QpackError,
-    /// Stream closed unexpectedly
-    StreamClosed,
 }
 
 /// Peer's H3 settings.
@@ -66,8 +58,6 @@ impl H3Settings {
 /// H3 control stream state.
 #[derive(Debug)]
 pub struct H3ControlStream {
-    /// Whether we've sent our SETTINGS frame
-    pub settings_sent: bool,
     /// Whether we've received peer SETTINGS
     pub settings_received: bool,
     /// Peer's settings
@@ -80,7 +70,6 @@ impl H3ControlStream {
     /// Create a new control stream state.
     pub fn new() -> Self {
         Self {
-            settings_sent: false,
             settings_received: false,
             peer_settings: H3Settings::default(),
             recv_buffer: BytesMut::new(),

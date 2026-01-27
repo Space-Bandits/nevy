@@ -50,15 +50,6 @@ impl WebTransportSession {
             state: SessionState::default(),
         }
     }
-
-    /// Create a session with a known session ID (for server accepting connection).
-    pub fn with_session_id(session_id: u64) -> Self {
-        Self {
-            session_id,
-            request_stream_id: None,
-            state: SessionState::default(),
-        }
-    }
 }
 
 impl Default for WebTransportSession {
