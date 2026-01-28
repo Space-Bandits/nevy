@@ -3289,6 +3289,7 @@ version = "0.4.0"
 dependencies = [
  "bevy",
  "nevy_messages",
+ "nevy_sync",
  "nevy_transport",
 ]
 
@@ -3302,6 +3303,19 @@ dependencies = [
  "nevy_transport",
  "postcard",
  "serde",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "nevy_sync"
+version = "0.4.0"
+dependencies = [
+ "bevy",
+ "log",
+ "nevy_messages",
+ "nevy_transport",
+ "serde",
+ "smallvec",
  "thiserror 2.0.17",
 ]
 
@@ -4509,6 +4523,9 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "smithay-client-toolkit"

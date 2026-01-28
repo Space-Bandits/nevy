@@ -1,6 +1,6 @@
 //! Channel connection context implementation.
 
-use std::{any::Any, collections::VecDeque};
+use std::{any::Any, collections::VecDeque, time::{Duration, Instant}};
 
 use bytes::Bytes;
 use crossbeam_channel::{Receiver, Sender, TrySendError};
@@ -10,6 +10,147 @@ use crate::{
 };
 
 use super::registry::ChannelMessage;
+
+/// Configuration for simulating adverse network conditions on a channel connection.
+///
+/// When set on a [`ChannelConnectionConfig`](super::endpoint::ChannelConnectionConfig),
+/// received messages will be delayed, dropped, or duplicated according to these parameters.
+/// When `None`, messages pass through with zero overhead.
+///
+/// The conditioner affects the **receive side** of this connection — it simulates what
+/// would happen to data traveling over an imperfect network before it reaches you.
+#[derive(Clone, Debug)]
+pub struct LinkConditionerConfig {
+    /// One-way latency in milliseconds added to every message.
+    pub latency_ms: u32,
+    /// Random jitter applied uniformly in the range `[-jitter_ms, +jitter_ms]`,
+    /// added on top of `latency_ms`. The effective delay is clamped to a minimum of 0.
+    pub jitter_ms: u32,
+    /// Probability of dropping a message outright. `0.0` = no loss, `1.0` = drop everything.
+    pub packet_loss: f64,
+    /// Probability of duplicating a message. `0.0` = no duplicates, `1.0` = duplicate everything.
+    /// Duplicates receive their own independent delay.
+    pub duplicate: f64,
+    /// Optional seed for deterministic behavior. If `None`, uses a time-based seed.
+    pub seed: Option<u64>,
+}
+
+impl Default for LinkConditionerConfig {
+    fn default() -> Self {
+        Self {
+            latency_ms: 0,
+            jitter_ms: 0,
+            packet_loss: 0.0,
+            duplicate: 0.0,
+            seed: None,
+        }
+    }
+}
+
+/// Simple xorshift64 RNG — no external dependency needed.
+struct SimpleRng {
+    state: u64,
+}
+
+impl SimpleRng {
+    fn new(seed: u64) -> Self {
+        // Ensure non-zero state
+        Self { state: if seed == 0 { 0x12345678_9abcdef0 } else { seed } }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state ^= self.state << 13;
+        self.state ^= self.state >> 7;
+        self.state ^= self.state << 17;
+        self.state
+    }
+
+    /// Returns a float in `[0.0, 1.0)`.
+    fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Returns a value in `[-range, +range]` (inclusive endpoints are approximate).
+    fn next_jitter(&mut self, range: u32) -> i64 {
+        if range == 0 {
+            return 0;
+        }
+        let span = range as u64 * 2 + 1;
+        let val = self.next_u64() % span;
+        val as i64 - range as i64
+    }
+}
+
+/// Internal state for the link conditioner.
+pub(crate) struct LinkConditionerState {
+    config: LinkConditionerConfig,
+    delayed: VecDeque<(Instant, ChannelMessage)>,
+    rng: SimpleRng,
+}
+
+impl LinkConditionerState {
+    fn new(config: LinkConditionerConfig) -> Self {
+        let seed = config.seed.unwrap_or_else(|| {
+            // Time-based seed
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(42)
+        });
+        Self {
+            config,
+            delayed: VecDeque::new(),
+            rng: SimpleRng::new(seed),
+        }
+    }
+
+    /// Decide whether to enqueue a message (applying loss/duplication/delay).
+    fn enqueue(&mut self, msg: ChannelMessage, now: Instant) {
+        // Packet loss check
+        if self.rng.next_f64() < self.config.packet_loss {
+            return; // Dropped
+        }
+
+        // Compute delivery time
+        let base_delay = self.config.latency_ms as i64;
+        let jitter = self.rng.next_jitter(self.config.jitter_ms);
+        let delay_ms = (base_delay + jitter).max(0) as u64;
+        let deliver_at = now + Duration::from_millis(delay_ms);
+
+        // Check for duplication *before* consuming the message
+        let should_duplicate = self.rng.next_f64() < self.config.duplicate;
+
+        if should_duplicate {
+            // Duplicate gets its own independent jitter
+            let dup_jitter = self.rng.next_jitter(self.config.jitter_ms);
+            let dup_delay_ms = (base_delay + dup_jitter).max(0) as u64;
+            let dup_deliver_at = now + Duration::from_millis(dup_delay_ms);
+            self.insert_sorted(dup_deliver_at, msg.clone());
+        }
+
+        self.insert_sorted(deliver_at, msg);
+    }
+
+    /// Insert a message into the delayed queue in sorted order (earliest first).
+    fn insert_sorted(&mut self, deliver_at: Instant, msg: ChannelMessage) {
+        let pos = self.delayed.iter().position(|(t, _)| *t > deliver_at)
+            .unwrap_or(self.delayed.len());
+        self.delayed.insert(pos, (deliver_at, msg));
+    }
+
+    /// Drain messages that are ready for delivery.
+    fn drain_ready(&mut self, now: Instant) -> Vec<ChannelMessage> {
+        let mut ready = Vec::new();
+        while let Some((deliver_at, _)) = self.delayed.front() {
+            if *deliver_at <= now {
+                ready.push(self.delayed.pop_front().unwrap().1);
+            } else {
+                break;
+            }
+        }
+        ready
+    }
+}
 
 /// Internal state for a channel connection.
 pub(crate) struct ChannelConnectionState {
@@ -29,12 +170,15 @@ pub(crate) struct ChannelConnectionState {
     pub datagram_index: usize,
     /// Whether close has been requested.
     pub close_requested: bool,
+    /// Optional link conditioner for simulating network conditions.
+    conditioner: Option<LinkConditionerState>,
 }
 
 impl ChannelConnectionState {
     pub fn new(
         tx: Sender<ChannelMessage>,
         rx: Receiver<ChannelMessage>,
+        conditioner_config: Option<LinkConditionerConfig>,
     ) -> Self {
         Self {
             tx,
@@ -45,40 +189,60 @@ impl ChannelConnectionState {
             datagrams: VecDeque::new(),
             datagram_index: 0,
             close_requested: false,
+            conditioner: conditioner_config.map(LinkConditionerState::new),
         }
     }
 
     /// Process all pending messages from the remote.
     pub fn poll_messages(&mut self) {
+        let now = Instant::now();
+
+        // Receive from channel — either buffer through conditioner or process directly
         while let Ok(msg) = self.rx.try_recv() {
-            match msg {
-                ChannelMessage::StreamOpen {
+            if let Some(ref mut conditioner) = self.conditioner {
+                conditioner.enqueue(msg, now);
+            } else {
+                self.process_message(msg);
+            }
+        }
+
+        // Release any delayed messages that are ready
+        if let Some(ref mut conditioner) = self.conditioner {
+            for msg in conditioner.drain_ready(now) {
+                self.process_message(msg);
+            }
+        }
+    }
+
+    /// Process a single message into the connection state.
+    fn process_message(&mut self, msg: ChannelMessage) {
+        match msg {
+            ChannelMessage::StreamOpen {
+                stream_id,
+                requirements,
+            } => {
+                self.streams.insert(
                     stream_id,
-                    requirements,
-                } => {
-                    self.streams.insert(
-                        stream_id,
-                        StreamState {
-                            recv_buffer: VecDeque::new(),
-                            send_closed: false,
-                            recv_closed: false,
-                        },
-                    );
-                    self.incoming_streams.push_back((stream_id, requirements));
+                    StreamState {
+                        recv_buffer: VecDeque::new(),
+                        send_closed: false,
+                        recv_closed: false,
+                    },
+                );
+                self.incoming_streams.push_back((stream_id, requirements));
+            }
+            ChannelMessage::StreamData { stream_id, data } => {
+                if let Some(stream) = self.streams.get_mut(&stream_id) {
+                    stream.recv_buffer.push_back(data);
                 }
-                ChannelMessage::StreamData { stream_id, data } => {
-                    if let Some(stream) = self.streams.get_mut(&stream_id) {
-                        stream.recv_buffer.push_back(data);
-                    }
+            }
+            ChannelMessage::StreamClose { stream_id } => {
+                if let Some(stream) = self.streams.get_mut(&stream_id) {
+                    stream.recv_closed = true;
                 }
-                ChannelMessage::StreamClose { stream_id } => {
-                    if let Some(stream) = self.streams.get_mut(&stream_id) {
-                        stream.recv_closed = true;
-                    }
-                }
-                ChannelMessage::Datagram(data) => {
-                    self.datagrams.push_back(data);
-                }
+            }
+            ChannelMessage::Datagram(data) => {
+                self.datagrams.push_back(data);
             }
         }
     }

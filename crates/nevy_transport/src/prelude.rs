@@ -41,4 +41,5 @@ pub use crate::protocols::channel::{
     ChannelTransportPlugin,
     ChannelConnectionConfig, ChannelConnectionContext, ChannelEndpoint,
     ChannelMessage, ChannelRegistry, ChannelStreamId, IncomingChannelConnection,
+    LinkConditionerConfig,
 };

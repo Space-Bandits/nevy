@@ -10,7 +10,7 @@ use crate::{
 };
 
 use super::{
-    connection::{ChannelConnectionContext, ChannelConnectionState},
+    connection::{ChannelConnectionContext, ChannelConnectionState, LinkConditionerConfig},
     registry::{ChannelMessage, ChannelRegistry, ConnectionRequest},
 };
 
@@ -21,6 +21,9 @@ use super::{
 pub struct ChannelConnectionConfig {
     /// The entity of the endpoint to connect to.
     pub remote_endpoint: Entity,
+    /// Optional link conditioner to simulate network conditions on this connection.
+    /// When `None`, messages pass through instantly with zero overhead.
+    pub link_conditioner: Option<LinkConditionerConfig>,
 }
 
 /// Marker component for incoming channel connections.
@@ -157,10 +160,12 @@ pub(super) fn create_connections(
             return Ok(());
         };
 
-        // Create connection state using the channels from the request
+        // Create connection state using the channels from the request.
+        // Incoming connections don't have a conditioner by default.
         let state = ChannelConnectionState::new(
             request.to_remote_tx,
             request.from_remote_rx,
+            None,
         );
 
         endpoint.add_connection(connection_entity, state);
@@ -214,7 +219,11 @@ pub(super) fn create_connections(
         }
 
         // Create local connection state
-        let state = ChannelConnectionState::new(to_remote_tx, from_remote_rx);
+        let state = ChannelConnectionState::new(
+            to_remote_tx,
+            from_remote_rx,
+            connection_config.link_conditioner.clone(),
+        );
         endpoint.add_connection(connection_entity, state);
 
         // Channel connections are established immediately

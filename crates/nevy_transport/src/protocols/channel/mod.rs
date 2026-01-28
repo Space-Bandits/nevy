@@ -18,7 +18,7 @@ pub mod connection;
 pub mod endpoint;
 pub mod registry;
 
-pub use connection::{ChannelConnectionContext, ChannelStreamId};
+pub use connection::{ChannelConnectionContext, ChannelStreamId, LinkConditionerConfig};
 pub use endpoint::{ChannelConnectionConfig, ChannelEndpoint, IncomingChannelConnection};
 pub use registry::{ChannelMessage, ChannelRegistry};
 
