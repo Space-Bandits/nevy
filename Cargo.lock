@@ -2815,6 +2815,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "http"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
+dependencies = [
+ "bytes",
+ "itoa",
+]
+
+[[package]]
 name = "image"
 version = "0.25.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2834,7 +2844,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "serde",
  "serde_core",
 ]
@@ -3279,6 +3289,7 @@ version = "0.4.0"
 dependencies = [
  "bevy",
  "nevy_messages",
+ "nevy_sync",
  "nevy_transport",
 ]
 
@@ -3296,15 +3307,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "nevy_sync"
+version = "0.4.0"
+dependencies = [
+ "bevy",
+ "log",
+ "nevy_messages",
+ "nevy_transport",
+ "serde",
+ "smallvec",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "nevy_transport"
 version = "0.4.0"
 dependencies = [
  "bevy",
  "bytes",
+ "crossbeam-channel",
+ "js-sys",
  "log",
+ "qpack",
  "quinn-proto",
  "quinn-udp",
  "thiserror 2.0.17",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -3949,6 +3979,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "qpack"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a4d4d85f50f59c6b93b23b1b359d30ae7029d4d22147431568effc8522b3f3e"
+dependencies = [
+ "bytes",
+ "http",
+]
+
+[[package]]
 name = "quic"
 version = "0.1.0"
 dependencies = [
@@ -4483,6 +4523,9 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "smithay-client-toolkit"
@@ -5218,6 +5261,27 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webtransport-example"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bevy",
+ "bevy_ecs",
+ "bytes",
+ "console_error_panic_hook",
+ "getrandom 0.3.3",
+ "nevy",
+ "quinn-proto",
+ "quinn-udp",
+ "rcgen",
+ "ring",
+ "rustls",
+ "time",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

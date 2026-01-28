@@ -1,3 +1,4 @@
 target/
 crates/transport/*.pem
 crates/transport/*.pem
+**/.DS_Store

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebTransport Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        #log { background: #0f0f1a; padding: 15px; border-radius: 5px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+        .error { color: #ff6b6b; }
+        .success { color: #51cf66; }
+        .info { color: #74c0fc; }
+        input { padding: 8px; width: 400px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>WebTransport Test Client</h1>
+
+    <div>
+        <label>Server URL: <input type="text" id="url" value="https://127.0.0.1:4433/"></label>
+    </div>
+    <div>
+        <label>Certificate Hash (base64): <input type="text" id="certHash" placeholder="Paste certificate hash here"></label>
+    </div>
+
+    <div>
+        <button onclick="connect()">Connect</button>
+        <button onclick="sendMessage()">Send Message</button>
+        <button onclick="disconnect()">Disconnect</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <h3>Log:</h3>
+    <div id="log"></div>
+
+    <script>
+        let transport = null;
+        let writer = null;
+        let reader = null;
+
+        function log(msg, type = 'info') {
+            const logEl = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logEl.innerHTML += `<span class="${type}">[${time}] ${msg}</span>\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(msg);
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        async function connect() {
+            const url = document.getElementById('url').value;
+            const certHashB64 = document.getElementById('certHash').value.trim();
+
+            if (!certHashB64) {
+                log('Please enter the certificate hash!', 'error');
+                return;
+            }
+
+            log(`Connecting to ${url}...`, 'info');
+            log(`Certificate hash: ${certHashB64}`, 'info');
+
+            try {
+                // Convert base64 to Uint8Array
+                const certHashBytes = Uint8Array.from(atob(certHashB64), c => c.charCodeAt(0));
+                log(`Hash bytes length: ${certHashBytes.length} (should be 32)`, 'info');
+
+                const options = {
+                    serverCertificateHashes: [{
+                        algorithm: "sha-256",
+                        value: certHashBytes
+                    }]
+                };
+
+                log(`Creating WebTransport with options: ${JSON.stringify({...options, serverCertificateHashes: [{algorithm: "sha-256", value: "[bytes]"}]})}`, 'info');
+
+                transport = new WebTransport(url, options);
+
+                log('Waiting for connection...', 'info');
+
+                // Set up closed handler before waiting for ready
+                transport.closed.then(() => {
+                    log('Connection closed cleanly', 'info');
+                }).catch((e) => {
+                    log(`Connection closed with error: ${e}`, 'error');
+                });
+
+                await transport.ready;
+                log('Connected successfully!', 'success');
+
+                // Open a bidirectional stream
+                log('Opening bidirectional stream...', 'info');
+                const stream = await transport.createBidirectionalStream();
+                writer = stream.writable.getWriter();
+                reader = stream.readable.getReader();
+                log('Stream opened!', 'success');
+
+                // Start reading
+                readLoop();
+            } catch (e) {
+                log(`Connection failed: ${e}`, 'error');
+                console.error(e);
+            }
+        }
+
+        async function readLoop() {
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        log('Stream read ended', 'info');
+                        break;
+                    }
+                    const text = new TextDecoder().decode(value);
+                    log(`Received: ${text}`, 'success');
+                }
+            } catch (e) {
+                log(`Read error: ${e}`, 'error');
+            }
+        }
+
+        async function sendMessage() {
+            if (!writer) {
+                log('Not connected! Connect first.', 'error');
+                return;
+            }
+
+            const msg = "Hello from browser!";
+            log(`Sending: ${msg}`, 'info');
+
+            try {
+                await writer.write(new TextEncoder().encode(msg));
+                log('Message sent!', 'success');
+            } catch (e) {
+                log(`Send failed: ${e}`, 'error');
+            }
+        }
+
+        async function disconnect() {
+            if (transport) {
+                log('Closing connection...', 'info');
+                try {
+                    if (writer) await writer.close();
+                    transport.close();
+                    log('Disconnected', 'info');
+                } catch (e) {
+                    log(`Disconnect error: ${e}`, 'error');
+                }
+                transport = null;
+                writer = null;
+                reader = null;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -44,7 +44,7 @@ impl Plugin for QuicTransportPlugin {
     }
 }
 
-pub(self) fn udp_transmit<'a>(
+pub(crate) fn udp_transmit<'a>(
     transmit: &'a quinn_proto::Transmit,
     buffer: &'a [u8],
 ) -> quinn_udp::Transmit<'a> {

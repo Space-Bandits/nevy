@@ -49,6 +49,15 @@ impl PluginGroup for NevyTransportPlugins {
         #[cfg(feature = "quic")]
         let builder = builder.add(protocols::quic::QuicTransportPlugin::new(self.schedule));
 
+        #[cfg(feature = "webtransport")]
+        let builder = builder.add(protocols::webtransport::WebTransportPlugin::new(self.schedule));
+
+        #[cfg(all(feature = "webtransport-web", target_arch = "wasm32"))]
+        let builder = builder.add(protocols::webtransport_web::WebTransportWebPlugin::new(self.schedule));
+
+        #[cfg(feature = "channel")]
+        let builder = builder.add(protocols::channel::ChannelTransportPlugin::new(self.schedule));
+
         builder
     }
 }
