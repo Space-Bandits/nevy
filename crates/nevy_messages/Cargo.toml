@@ -1,6 +1,6 @@
 [package]
 name = "nevy_messages"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 categories = ["network-programming", "game-development"]
 description = "Structured messages for nevy"
@@ -15,7 +15,7 @@ bevy.workspace = true
 log.workspace = true
 bytes.workspace = true
 
-nevy_transport = { path = "../nevy_transport", version = "0.4.0" }
+nevy_transport = { path = "../nevy_transport", version = "0.5.0" }
 
 serde = { version = "1.0", features = ["derive"] }
 postcard = { version = "1.1.3", features = ["use-std"] }

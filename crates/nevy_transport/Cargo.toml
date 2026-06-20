@@ -1,6 +1,6 @@
 [package]
 name = "nevy_transport"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 categories = ["network-programming", "game-development"]
 description = "Type erased networking API for nevy"
@@ -21,5 +21,5 @@ bytes.workspace = true
 
 thiserror = "2.0"
 
-quinn-proto = { version = "0.11.3", features = ["rustls"], optional = true }
-quinn-udp = { version = "0.5.14", optional = true }
+quinn-proto = { version = "0.11.14", features = ["rustls"], optional = true }
+quinn-udp = { version = "0.6.1", optional = true }
