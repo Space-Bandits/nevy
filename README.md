@@ -91,3 +91,5 @@ See the examples for more details, including how nevy's messaging crate works fo
 | -----| ---- |
 | 0.16 | 0.1  |
 | 0.17 | 0.3  |
+| 0.18 | 0.4  |
+| 0.19 | 0.5  |
