@@ -1,6 +1,6 @@
 [package]
 name = "nevy"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 categories = ["network-programming", "game-development"]
 description = "Game networking library for the Bevy game engine"
@@ -16,8 +16,8 @@ quic = ["nevy_transport/quic"]
 messages = ["dep:nevy_messages"]
 
 [dependencies]
-nevy_transport = { path = "crates/nevy_transport", version = "0.5.0" }
-nevy_messages = { path = "crates/nevy_messages", version = "0.5.0", optional = true }
+nevy_transport = { path = "crates/nevy_transport", version = "0.5.1" }
+nevy_messages = { path = "crates/nevy_messages", version = "0.5.1", optional = true }
 bevy.workspace = true
 
 [workspace]
