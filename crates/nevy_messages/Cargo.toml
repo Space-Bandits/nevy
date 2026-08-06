@@ -6,7 +6,7 @@ categories = ["network-programming", "game-development"]
 description = "Structured messages for nevy"
 keywords = ["netcode", "networking", "bevy"]
 license = "MIT OR Apache-2.0"
-readme = "readme.md"
+readme = "README.md"
 repository = "https://github.com/space-bandits/nevy"
 documentation = "https://docs.rs/nevy"
 
