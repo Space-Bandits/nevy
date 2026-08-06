@@ -67,11 +67,6 @@ pub(crate) fn read_streams(
                 };
 
                 loop {
-                    // Consume bits of the chunk until it is empty.
-                    if chunk.is_empty() {
-                        break;
-                    }
-
                     match reader {
                         &mut MessageStreamReaderState::ReceivingId { ref mut decoder } => {
                             let (result, used) = decoder.push_bytes(chunk.as_ref());
@@ -97,6 +92,11 @@ pub(crate) fn read_streams(
                                     length: length.as_u64() as usize,
                                     buffer: Vec::new(),
                                 };
+
+                                // Skip chunk empty check if message is length zero.
+                                if length.as_u64() == 0 {
+                                    continue;
+                                }
                             }
                         }
                         &mut MessageStreamReaderState::ReceivingMessage {
@@ -120,6 +120,13 @@ pub(crate) fn read_streams(
                                 readers.buffers.entry(id).or_default().push_back(message);
                             }
                         }
+                    }
+
+                    // Consume bits of the chunk until it is empty.
+                    //
+                    // Check is at the end of the loop to allow `continue` to skip check in case of messange length zero.
+                    if chunk.is_empty() {
+                        break;
                     }
                 }
             });
