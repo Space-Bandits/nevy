@@ -44,7 +44,7 @@ fn setup(mut commands: Commands) {
 
 /// Logs changes to the connection status
 fn log_status_changes(
-    insert: On<Insert, ConnectionStatus>,
+    insert: On<Insert<ConnectionStatus>>,
     status_q: Query<&ConnectionStatus>,
 ) -> Result {
     let status = status_q.get(insert.entity)?;

@@ -1,6 +1,6 @@
 [package]
 name = "nevy_messages"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 categories = ["network-programming", "game-development"]
 description = "Structured messages for nevy"
@@ -10,12 +10,15 @@ readme = "README.md"
 repository = "https://github.com/space-bandits/nevy"
 documentation = "https://docs.rs/nevy"
 
+[features]
+stream_headers = ["nevy_transport/stream_headers"]
+
 [dependencies]
 bevy.workspace = true
 log.workspace = true
 bytes.workspace = true
 
-nevy_transport = { path = "../nevy_transport", version = "0.5.1" }
+nevy_transport = { path = "../nevy_transport", version = "0.6.0" }
 
 serde = { version = "1.0", features = ["derive"] }
 postcard = { version = "1.1.3", features = ["use-std"] }

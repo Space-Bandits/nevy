@@ -1,3 +1,7 @@
+use std::ops::Deref;
+
+use bytes::BufMut;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VarInt(u64);
 
@@ -20,32 +24,64 @@ impl VarInt {
         self.0
     }
 
-    pub fn encode(&self, buffer: &mut Vec<u8>) {
-        let &VarInt(mut value) = self;
-        let mut bytes_used = 0;
+    pub fn encode(self) -> EncodedVarInt {
+        let VarInt(mut value) = self;
+        let mut encoded = EncodedVarInt {
+            bytes: [0; 8],
+            len: 0,
+        };
 
         loop {
-            let limit_reached = bytes_used >= 7;
+            // The eighth byte holds a full 8 bits and never has a continuation bit.
+            if encoded.len >= 7 {
+                encoded.push(value as u8);
+                return encoded;
+            }
 
-            let mask = if limit_reached {
-                0b1111_1111
-            } else {
-                0b0111_1111
-            };
-            let byte = value as u8 & mask;
+            let byte = value as u8 & 0b0111_1111;
 
             value = value >> 7;
             let continuation_bit = value != 0;
 
-            buffer.push(byte | ((continuation_bit as u8) << 7));
+            encoded.push(byte | ((continuation_bit as u8) << 7));
 
-            bytes_used += 1;
-            if continuation_bit {
-                continue;
+            if !continuation_bit {
+                return encoded;
             }
-
-            return;
         }
+    }
+
+    /// Appends the encoding to `buffer`.
+    pub fn encode_into(self, buffer: &mut impl BufMut) {
+        buffer.put_slice(&self.encode());
+    }
+}
+
+/// The encoding of a [`VarInt`], at most 8 bytes, which derefs to its bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EncodedVarInt {
+    bytes: [u8; 8],
+    len: u8,
+}
+
+impl EncodedVarInt {
+    fn push(&mut self, byte: u8) {
+        self.bytes[self.len as usize] = byte;
+        self.len += 1;
+    }
+}
+
+impl Deref for EncodedVarInt {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+}
+
+impl AsRef<[u8]> for EncodedVarInt {
+    fn as_ref(&self) -> &[u8] {
+        self
     }
 }
 
@@ -173,10 +209,18 @@ mod tests {
             VarInt::from_u64(0b1_1111110_1111101_1111011_1110111_1101111_1011111_0111111_1111111)
                 .unwrap();
 
-        let mut buffer = Vec::<u8>::new();
-        number.encode(&mut buffer);
+        let encoded = number.encode();
+        assert_eq!(encoded.len(), 8);
 
         let mut decoder = VarIntDecoder::default();
-        assert_eq!(decoder.push_bytes(&buffer).0, Some(number));
+        assert_eq!(decoder.push_bytes(&encoded), (Some(number), 8));
+    }
+
+    #[test]
+    fn encode_into_appends() {
+        let mut buffer = vec![0xAA];
+        VarInt::from_u64(300).unwrap().encode_into(&mut buffer);
+
+        assert_eq!(buffer, [0xAA, 0b1010_1100, 0b0000_0010]);
     }
 }

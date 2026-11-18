@@ -4,6 +4,12 @@ pub use crate::{
     TransportUpdateSystems,
 };
 
+#[cfg(feature = "stream_headers")]
+pub use crate::headers::{
+    HeaderedStream, HeaderedStreams, RegisterStreamHeader, StreamHeader, StreamHeaderSystems,
+    StreamHeadersPlugin,
+};
+
 #[cfg(feature = "quic")]
 pub use crate::protocols::quic::{
     QuicTransportPlugin,

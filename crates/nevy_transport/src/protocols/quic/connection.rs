@@ -95,7 +95,7 @@ impl<'a> QuicConnectionContext<'a> {
             )
         } {
             // the transmit failing is equivelant to dropping due to congestion, ignore error
-            let _ = self.socket_state.send(
+            let _ = self.socket_state.try_send(
                 quinn_udp::UdpSockRef::from(&self.socket),
                 &udp_transmit(&transmit, &self.send_buffer),
             );

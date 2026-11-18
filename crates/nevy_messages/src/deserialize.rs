@@ -45,7 +45,7 @@ where
 }
 
 fn insert_received_messages<T>(
-    insert: On<Insert, ConnectionProtocolEntity>,
+    insert: On<Insert<ConnectionProtocolEntity>>,
     mut commands: Commands,
     connection_q: Query<&ConnectionProtocolEntity>,
     protocol_q: Query<&Protocol>,
