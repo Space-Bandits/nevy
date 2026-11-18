@@ -41,7 +41,7 @@ fn setup(mut commands: Commands) {
 
 /// Accepts quic connections.
 fn accept_connections(
-    insert: On<Insert, IncomingQuicConnection>,
+    insert: On<Insert<IncomingQuicConnection>>,
     mut commands: Commands,
     connection_q: Query<&IncomingQuicConnection>,
 ) -> Result {
@@ -65,7 +65,7 @@ fn read_messages(mut connection_q: Query<&mut ReceivedMessages<HelloServer>>) {
 }
 
 fn log_status_changes(
-    insert: On<Insert, ConnectionStatus>,
+    insert: On<Insert<ConnectionStatus>>,
     status_q: Query<&ConnectionStatus>,
 ) -> Result {
     let status = status_q.get(insert.entity)?;

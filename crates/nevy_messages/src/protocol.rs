@@ -168,7 +168,7 @@ impl ProtocolBuilder for App {
 /// When a [`ConnectionOf`] is inserted and it's endpoint has a [`ReceiveProtocol<P>`],
 /// insert a [`ReceiveProtocol<P>`] onto the connection.
 fn insert_receive_protocol<P>(
-    insert: On<Insert, ConnectionOf>,
+    insert: On<Insert<ConnectionOf>>,
     mut commands: Commands,
     connection_q: Query<&ConnectionOf>,
     endpoint_q: Query<(), With<ConnectionProtocol<P>>>,
@@ -190,7 +190,7 @@ where
 /// When a [`ConnectionProtocol<P>`] is inserted,
 /// inserts a [`ConnectionProtocolEntity`] pointing to the [`Protocol`] [`Entity`] for protocol `P`.
 fn insert_receive_protocol_entity<P>(
-    insert: On<Insert, ConnectionProtocol<P>>,
+    insert: On<Insert<ConnectionProtocol<P>>>,
     mut commands: Commands,
     connection_q: Query<(), With<ConnectionOf>>,
     protocol_entity: Res<ProtocolEntity<P>>,

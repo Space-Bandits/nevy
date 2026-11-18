@@ -1,6 +1,6 @@
 [package]
 name = "nevy"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 categories = ["network-programming", "game-development"]
 description = "Game networking library for the Bevy game engine"
@@ -17,8 +17,8 @@ messages = ["dep:nevy_messages"]
 stream_headers = ["nevy_transport/stream_headers", "nevy_messages?/stream_headers"]
 
 [dependencies]
-nevy_transport = { path = "crates/nevy_transport", version = "0.5.1" }
-nevy_messages = { path = "crates/nevy_messages", version = "0.5.1", optional = true }
+nevy_transport = { path = "crates/nevy_transport", version = "0.6.0" }
+nevy_messages = { path = "crates/nevy_messages", version = "0.6.0", optional = true }
 bevy.workspace = true
 
 [workspace]
@@ -26,6 +26,6 @@ resolver = "3"
 members = ["crates/*", "examples/*"]
 
 [workspace.dependencies]
-bevy = { version = "0.19", default-features = false }
+bevy = { version = "0.20", default-features = false }
 log = "0.4"
 bytes = { version = "1.11" }

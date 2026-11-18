@@ -75,7 +75,7 @@ pub(super) fn update_endpoints(
 }
 
 pub(super) fn create_connections(
-    insert: On<Insert, ConnectionOf>,
+    insert: On<Insert<ConnectionOf>>,
     mut commands: Commands,
     mut endpoint_q: Query<&mut Endpoint>,
     mut connection_q: Query<(
@@ -192,7 +192,7 @@ pub(super) fn create_connections(
 }
 
 pub(super) fn remove_connections(
-    replace: On<Discard, ConnectionOf>,
+    replace: On<Discard<ConnectionOf>>,
     connection_q: Query<&ConnectionOf>,
     mut endpoint_q: Query<&mut Endpoint>,
 ) -> Result {
@@ -235,7 +235,7 @@ pub(super) fn remove_connections(
 }
 
 pub(super) fn refuse_connections(
-    replace: On<Discard, IncomingQuicConnection>,
+    replace: On<Discard<IncomingQuicConnection>>,
     mut endpoint_q: Query<&mut Endpoint>,
     mut connection_q: Query<&mut IncomingQuicConnection>,
 ) -> Result {
