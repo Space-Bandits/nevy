@@ -13,6 +13,7 @@ documentation = "https://docs.rs/nevy"
 [features]
 default = ["quic"]
 quic = ["dep:quinn-proto", "dep:quinn-udp"]
+stream_headers = []
 
 [dependencies]
 bevy.workspace = true

@@ -114,7 +114,7 @@ pub(super) fn create_connections(
         ) {
             Err(err) => {
                 if let Some(transmit) = err.response {
-                    let _ = endpoint.socket_state.send(
+                    let _ = endpoint.socket_state.try_send(
                         UdpSockRef::from(&endpoint.socket),
                         &udp_transmit(&transmit, &endpoint.send_buffer),
                     );
@@ -256,7 +256,7 @@ pub(super) fn refuse_connections(
             .endpoint
             .refuse(incoming, &mut endpoint.send_buffer);
 
-        let _ = endpoint.socket_state.send(
+        let _ = endpoint.socket_state.try_send(
             UdpSockRef::from(&endpoint.socket),
             &udp_transmit(&transmit, &endpoint.send_buffer),
         );
@@ -433,7 +433,7 @@ impl QuicEndpoint {
 
         if let Some(transmit) = transmit {
             // the transmit failing is equivelant to dropping due to congestion
-            let _ = self.socket_state.send(
+            let _ = self.socket_state.try_send(
                 quinn_udp::UdpSockRef::from(&self.socket),
                 &udp_transmit(&transmit, &self.send_buffer),
             );

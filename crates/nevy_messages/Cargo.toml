@@ -10,6 +10,9 @@ readme = "README.md"
 repository = "https://github.com/space-bandits/nevy"
 documentation = "https://docs.rs/nevy"
 
+[features]
+stream_headers = ["nevy_transport/stream_headers"]
+
 [dependencies]
 bevy.workspace = true
 log.workspace = true

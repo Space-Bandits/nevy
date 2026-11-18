@@ -8,8 +8,11 @@ use bevy::{
 use bytes::Bytes;
 use thiserror::Error;
 
+#[cfg(feature = "stream_headers")]
+pub mod headers;
 pub mod prelude;
 pub mod protocols;
+pub mod varint;
 
 /// The schedule where implementations place their update systems by default.
 pub const DEFAULT_TRANSPORT_SCHEDULE: PostUpdate = PostUpdate;
@@ -197,6 +200,24 @@ pub trait ConnectionContext {
 
     /// Returns `true` when all reliable data on the connection has been sent.
     fn all_data_sent(&mut self) -> bool;
+
+    /// Opens a stream and returns it with its encoded header.
+    ///
+    /// The returned header bytes must be written to the stream before any other data. On a stream
+    /// where [`StreamHeader::per_chunk`] is `true` they must instead prefix every chunk.
+    ///
+    /// [`StreamHeader::per_chunk`]: headers::StreamHeader::per_chunk
+    #[cfg(feature = "stream_headers")]
+    fn new_headered_stream(
+        &mut self,
+        requirements: StreamRequirements,
+        header: headers::StreamHeader,
+    ) -> Result<(Stream, varint::EncodedVarInt)> {
+        let header = header.encode()?;
+        let stream = self.new_stream(requirements)?;
+
+        Ok((stream, header))
+    }
 }
 
 /// An id for a stream on a connection that is either send, receive or both.

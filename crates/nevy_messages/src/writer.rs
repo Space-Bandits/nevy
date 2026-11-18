@@ -6,13 +6,13 @@ use bevy::{
     prelude::*,
 };
 use bytes::Bytes;
-use nevy_transport::prelude::*;
+use nevy_transport::{
+    prelude::*,
+    varint::{EncodedVarInt, VarInt},
+};
 use serde::Serialize;
 
-use crate::{
-    protocol::{ConnectionProtocolEntity, Protocol},
-    varint::VarInt,
-};
+use crate::protocol::{ConnectionProtocolEntity, Protocol};
 
 /// A state machine for a stream that sends messages.
 ///
@@ -22,6 +22,10 @@ pub struct MessageStreamState {
     /// Each chunk of data must be sent entirely.
     /// This is why they are kept separately.
     buffer: VecDeque<Bytes>,
+    /// The stream header, written before the next message.
+    header: Option<EncodedVarInt>,
+    /// Whether [`Self::header`] is written before every message instead of only the first.
+    header_per_chunk: bool,
 }
 
 impl MessageStreamState {
@@ -31,6 +35,25 @@ impl MessageStreamState {
         Ok(MessageStreamState {
             stream,
             buffer: VecDeque::new(),
+            header: None,
+            header_per_chunk: false,
+        })
+    }
+
+    /// Opens a stream that starts with a stream header.
+    #[cfg(feature = "stream_headers")]
+    pub fn new_with_header(
+        mut connection: Connection,
+        requirements: StreamRequirements,
+        header: impl Into<StreamHeader>,
+    ) -> Result<Self> {
+        let (stream, header) = connection.new_headered_stream(requirements, header.into())?;
+
+        Ok(MessageStreamState {
+            stream,
+            buffer: VecDeque::new(),
+            header: Some(header),
+            header_per_chunk: StreamHeader::per_chunk(requirements),
         })
     }
 
@@ -69,15 +92,27 @@ impl MessageStreamState {
 
         let message = postcard::to_stdvec(message)?;
 
-        let mut buffer = Vec::with_capacity(message.len() + 16);
+        let header = match self.header_per_chunk {
+            true => self.header,
+            false => self.header.take(),
+        };
+
+        // + 24 is space for header, message id and message length.
+        // Exact size not important for such a small number,
+        // just avoiding double allocation when more space is needed.
+        let mut buffer = Vec::with_capacity(message.len() + 24);
+
+        if let Some(header) = header {
+            buffer.extend_from_slice(&header);
+        }
 
         VarInt::from_u64(message_id as u64)
             .ok_or("Message id was too big for VarInt")?
-            .encode(&mut buffer);
+            .encode_into(&mut buffer);
 
         VarInt::from_u64(message.len() as u64)
             .ok_or("Message length was too big for VarInt")?
-            .encode(&mut buffer);
+            .encode_into(&mut buffer);
 
         buffer.extend(message);
 
@@ -106,6 +141,35 @@ pub struct MessageSenderParams<'w, 's> {
     connection_q: Query<'w, 's, (&'static ConnectionOf, &'static ConnectionProtocolEntity)>,
     endpoint_q: Query<'w, 's, &'static mut Endpoint>,
     protocol_q: Query<'w, 's, &'static Protocol>,
+    #[cfg(feature = "stream_headers")]
+    header: Option<Res<'w, MessageStreamHeader>>,
+}
+
+/// The stream header every message stream is opened with,
+/// inserted when messages use [`MessageStreams::Header`](crate::MessageStreams::Header).
+#[cfg(feature = "stream_headers")]
+#[derive(Resource, Deref, Clone, Copy)]
+pub(crate) struct MessageStreamHeader(pub StreamHeader);
+
+impl MessageSenderParams<'_, '_> {
+    #[cfg(feature = "stream_headers")]
+    fn header(&self) -> Option<StreamHeader> {
+        return self.header.as_ref().map(|header| ***header);
+    }
+}
+
+/// Opens a message stream, with the configured stream header if one is provided.
+fn new_message_stream(
+    #[cfg(feature = "stream_headers")] header: Option<StreamHeader>,
+    connection: Connection,
+    requirements: StreamRequirements,
+) -> Result<MessageStreamState> {
+    #[cfg(feature = "stream_headers")]
+    if let Some(header) = header {
+        return MessageStreamState::new_with_header(connection, requirements, header);
+    }
+
+    MessageStreamState::new(connection, requirements)
 }
 
 /// Holds a [`MessageSenderState`] in a system [`Local`].
@@ -216,15 +280,21 @@ pub trait MessageSender<'w, 's> {
             )
         })?;
 
+        #[cfg(feature = "stream_headers")]
+        let header = params.header();
         let mut endpoint = params.endpoint_q.get_mut(endpoint_entity)?;
         let mut connection = endpoint.get_connection(connection_entity)?;
 
         let stream_state = match state.streams.entry(connection_entity) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => entry.insert(MessageStreamState::new(
-                connection.reborrow(),
-                requirements,
-            )?),
+            Entry::Vacant(entry) => {
+                #[cfg(feature = "stream_headers")]
+                let stream_state = new_message_stream(header, connection.reborrow(), requirements)?;
+                #[cfg(not(feature = "stream_headers"))]
+                let stream_state = new_message_stream(connection.reborrow(), requirements)?;
+
+                entry.insert(stream_state)
+            }
         };
 
         stream_state.write(connection, message_id, queue, message)

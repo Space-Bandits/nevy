@@ -14,6 +14,7 @@ documentation = "https://docs.rs/nevy"
 default = ["quic", "messages"]
 quic = ["nevy_transport/quic"]
 messages = ["dep:nevy_messages"]
+stream_headers = ["nevy_transport/stream_headers", "nevy_messages?/stream_headers"]
 
 [dependencies]
 nevy_transport = { path = "crates/nevy_transport", version = "0.5.1" }
